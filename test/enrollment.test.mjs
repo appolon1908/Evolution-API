@@ -59,3 +59,9 @@ test("reject invalid user controlled IDs and never fetch when enrollment disable
  await assert.rejects(client.execute("meta.request-code",{phone_number_id:"123456",method:"SMS",language:"en_US"}),e=>e.code==="provider_enrollment_disabled");
  assert.equal(calls,0);
 });
+
+test("bare base64 image from Evolution is normalized for QR display",async()=>{
+ const client=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),async()=>({ok:true,json:async()=>({base64:"B".repeat(180)})}));
+ const qr=await client.execute("evolution.qr",{instance_name:"test-instance"});
+ assert.equal(qr.qr_image,"data:image/png;base64,"+"B".repeat(180));
+});
