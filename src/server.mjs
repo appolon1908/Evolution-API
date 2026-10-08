@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 ﻿import http from "node:http";
 import { loadConfig } from "./config.mjs";
 import { ProviderError, requireString } from "./contracts.mjs";
@@ -160,7 +161,7 @@ function cryptoRandom() {
   return globalThis.crypto?.randomUUID?.() || `corr-${Date.now()}`;
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const config = loadConfig();
   createApp(config).listen(config.port, "0.0.0.0", () => {
     console.log(JSON.stringify({ service: "codestra-evolution-adapter", port: config.port, external_send_enabled: config.externalSendEnabled }));
