@@ -79,8 +79,11 @@ export function createEnrollmentClient(config,fetcher=fetch) {
       ensureEnabled();
       const info=await send(evo("/instance/connect/"+encodeURIComponent(args.instance_name)),config.evolutionApiKey,"GET",null,"evolution");
       const code=info.base64||info.qrcode?.base64||info.qrcode?.base64Img||"";
-      // Return image only, never the raw pairing secret or upstream apikey.
-      return {instance_name:args.instance_name,qr_image:typeof code==="string"&&/^data:image\/png;base64,[A-Za-z0-9+/=]{100,400000}$/.test(code)?code:null,state:"awaiting_scan"};
+      // Some Evolution versions return bare PNG base64 instead of a data URL.
+      const normalized=typeof code!=="string"?"":code.startsWith("data:image/png;base64,")?code:
+        /^[A-Za-z0-9+/=]{100,400000}$/.test(code)?"data:image/png;base64,"+code:"";
+      // Return image only, never raw pairing secrets or upstream apikeys.
+      return {instance_name:args.instance_name,qr_image:/^data:image\/png;base64,[A-Za-z0-9+/=]{100,400000}$/.test(normalized)?normalized:null,state:"awaiting_scan"};
     }
     if(action==="evolution.status"){
       if(!validInstance(args.instance_name))throw new EnrollmentError("invalid_instance_name");
