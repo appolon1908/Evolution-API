@@ -6,6 +6,7 @@
 export function loadConfig(env = process.env) {
   return Object.freeze({
     port: Number(env.PORT || 8781),
+    enrollmentEnabled: String(env.PROVIDER_ENROLLMENT_ENABLED || "false").toLowerCase() === "true",
     externalSendEnabled: String(env.EXTERNAL_SEND_ENABLED || "false").toLowerCase() === "true",
     forwardEventsEnabled: String(env.FORWARD_EVENTS_ENABLED || "false").toLowerCase() === "true",
     middlewareBaseUrl: env.MIDDLEWARE_BASE_URL || "http://middleware-integration-api:8095",
