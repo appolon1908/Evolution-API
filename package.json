@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "codestra-evolution-adapter",
   "version": "0.1.0",
   "private": true,
@@ -6,7 +6,8 @@
   "description": "Thin WhatsApp provider adapter behind Codestra Middleware V3",
   "scripts": {
     "start": "node src/server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "certify": "node scripts/certify-contract.mjs"
   },
   "engines": {
     "node": ">=20"

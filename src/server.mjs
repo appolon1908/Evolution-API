@@ -1,4 +1,4 @@
-﻿import http from "node:http";
+import http from "node:http";
 import { loadConfig } from "./config.mjs";
 import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
@@ -20,8 +20,53 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
+function requireJsonContentType(req) {
+  const value = String(req.headers["content-type"] || "").toLowerCase();
+  if (!value.startsWith("application/json")) {
+    throw new ProviderError("unsupported_media_type", "content-type must be application/json", { status: 415, retryHint: "never" });
+  }
+}
+
+function parseJson(raw) {
+  try {
+    return JSON.parse(raw.toString("utf8") || "{}");
+  } catch {
+    throw new ProviderError("invalid_json", "request body must be valid JSON", { status: 400, retryHint: "never" });
+  }
+}
+
+function requiredHeader(req, name) {
+  const value = req.headers[name.toLowerCase()];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ProviderError("required_header_missing", `${name} is required`, { status: 400, retryHint: "never" });
+  }
+  return value.trim();
+}
+
+function enforceTransportParity(req, body) {
+  const expected = {
+    "X-Command-ID": requireString(body.command_id, "command_id"),
+    "X-Tenant-ID": requireString(body.tenant_id, "tenant_id"),
+    "X-Correlation-ID": requireString(body.correlation_id, "correlation_id"),
+    "Idempotency-Key": requireString(body.idempotency_key, "idempotency_key")
+  };
+  for (const [name, bodyValue] of Object.entries(expected)) {
+    const headerValue = requiredHeader(req, name);
+    if (headerValue !== bodyValue) {
+      throw new ProviderError("header_body_mismatch", `${name} must match request body`, { status: 409, retryHint: "never" });
+    }
+  }
+}
+
 function json(res, status, body, headers = {}) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...headers });
+  const correlation = typeof body?.correlation_id === "string" ? { "x-correlation-id": body.correlation_id } : {};
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    ...correlation,
+    ...headers
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -48,14 +93,26 @@ export function createApp(customConfig = loadConfig()) {
       }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
-        return json(res, 200, {
-          status: "ready",
+        const providerStatus = Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }]));
+        const problems = [];
+        if (!customConfig.adapterServiceToken) problems.push("service_auth_not_configured");
+        if (customConfig.externalSendEnabled && !Object.values(providerStatus).some((item) => item.configured)) {
+          problems.push("no_provider_configured");
+        }
+        if (customConfig.forwardEventsEnabled && !customConfig.middlewareEventUrl) problems.push("middleware_event_url_not_configured");
+        const ready = problems.length === 0;
+        return json(res, ready ? 200 : 503, {
+          status: ready ? "ready" : "not_ready",
           safe_mode: !customConfig.externalSendEnabled,
-          providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }]))
+          service_auth_configured: Boolean(customConfig.adapterServiceToken),
+          providers: providerStatus,
+          problems
         });
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/transport/health") {
+        const authError = internalAuthError(req, customConfig);
+        if (authError) return json(res, authError.status, { error: { code: authError.code } });
         return json(res, 200, {
           middleware_v3_authority: true,
           provider_adapter_only: true,
@@ -66,11 +123,11 @@ export function createApp(customConfig = loadConfig()) {
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/transport/messages") {
         const authError = internalAuthError(req, customConfig);
         if (authError) return json(res, authError.status, { error: { code: authError.code } });
+        requireJsonContentType(req);
         const raw = await readBody(req);
-        const body = JSON.parse(raw.toString("utf8") || "{}");
-        requireString(body.command_id, "command_id");
-        requireString(body.correlation_id, "correlation_id");
-        requireString(body.idempotency_key, "idempotency_key");
+        const body = parseJson(raw);
+        enforceTransportParity(req, body);
+        requireString(body.campaign_id, "campaign_id");
         const providerName = requireString(body.provider, "provider");
         if (!customConfig.externalSendEnabled) {
           return json(res, 423, {
@@ -100,11 +157,12 @@ export function createApp(customConfig = loadConfig()) {
       }
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/evolution") {
+        requireJsonContentType(req);
         const raw = await readBody(req);
         if (!verifySharedSecret(customConfig.evolutionWebhookSecret, req.headers["x-codestra-webhook-secret"])) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
-        const event = normalizeEvolutionWebhook(JSON.parse(raw.toString("utf8") || "{}"));
+        const event = normalizeEvolutionWebhook(parseJson(raw));
         state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
         return json(res, 202, { accepted: true, event, forward });
@@ -122,11 +180,12 @@ export function createApp(customConfig = loadConfig()) {
       }
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
+        requireJsonContentType(req);
         const raw = await readBody(req);
         if (!verifyMetaSignature(customConfig.metaAppSecret, raw, req.headers["x-hub-signature-256"])) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
-        const event = normalizeMetaWebhook(JSON.parse(raw.toString("utf8") || "{}"));
+        const event = normalizeMetaWebhook(parseJson(raw));
         state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
         return json(res, 202, { accepted: true, event, forward });
