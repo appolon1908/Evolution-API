@@ -3,6 +3,8 @@ name: Required exact-SHA CI
 on:
   pull_request:
     branches: [development]
+  push:
+    branches: [development, testing, staging, production]
   workflow_dispatch:
     inputs:
       target_sha:
@@ -22,8 +24,8 @@ jobs:
     timeout-minutes: 30
     env:
       EVENT_NAME: ${{ github.event_name }}
-      EXPECTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || github.event.pull_request.head.sha }}
-      BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+      EXPECTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.target_sha || (github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha) }}
+      BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || (github.event_name == 'push' && github.event.before || '') }}
     steps:
       - name: Enforce certification lane
         shell: bash
@@ -31,6 +33,8 @@ jobs:
           set -euo pipefail
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             test "${GITHUB_REF_NAME}" = "development"
+            # The manual check suite is attached to GITHUB_SHA: never certify a different target.
+            test "${GITHUB_SHA}" = "${EXPECTED_SHA}"
           fi
 
       - name: Check out exact candidate SHA
@@ -59,8 +63,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "push" ]]; then
             test -n "$BASE_SHA"
+            test "$BASE_SHA" != "0000000000000000000000000000000000000000"
             git diff --check "$BASE_SHA" "$EXPECTED_SHA"
           else
             git diff --check "$EXPECTED_SHA^" "$EXPECTED_SHA"
@@ -96,7 +101,7 @@ jobs:
       - name: Upload exact-SHA evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: exact-sha-evidence-${{ github.run_id }}
+          name: exact-sha-evidence-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/exact-sha-evidence.txt
           if-no-files-found: error
           retention-days: 14
