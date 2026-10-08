@@ -1,0 +1,44 @@
+name: Codestra Phone Enrollment CI
+on:
+  pull_request:
+    branches: ["fix/cli-entrypoint-development-20261008", development]
+  push:
+    branches: ["feat/phone-enrollment-staging-20261008"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phone-enrollment:
+    name: Staging enrollment contract and safety tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify committed source integrity
+        run: git diff --check
+      - name: Check JS syntax
+        run: |
+          node --check src/server.mjs
+          node --check src/config.mjs
+          node --check src/enrollment.mjs
+      - name: Run provider and API tests
+        run: node --test
+      - name: Verify default-deny external effects
+        run: |
+          node --input-type=module - <<'NODE'
+          import assert from "node:assert/strict";
+          import { loadConfig } from "./src/config.mjs";
+          const c=loadConfig({});
+          assert.equal(c.externalSendEnabled ?? c.productionSend,false);
+          assert.equal(c.enrollmentEnabled ?? c.phoneEnrollmentEnabled,false);
+          console.log("PHONE_ENROLLMENT_DEFAULT_DENY=PASS");
+          NODE

@@ -1,3 +1,4 @@
+import { createEnrollmentClient, EnrollmentError, sameSecret } from "./enrollment.mjs";
 import { pathToFileURL } from "node:url";
 ﻿import http from "node:http";
 import { loadConfig } from "./config.mjs";
@@ -26,7 +27,8 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-export function createApp(customConfig = loadConfig()) {
+export function createApp(customConfig = loadConfig(), dependencies = {}) {
+  const enrollment = dependencies.enrollment || createEnrollmentClient(customConfig, dependencies.fetcher);
   const state = createMessageState();
   const providers = {
     evolution: createEvolutionProvider(customConfig),
@@ -54,6 +56,23 @@ export function createApp(customConfig = loadConfig()) {
           safe_mode: !customConfig.externalSendEnabled,
           providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }]))
         });
+      }
+
+      if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/enrollment/health") {
+        if (!sameSecret(req.headers["x-enrollment-service-key"],customConfig.adapterServiceToken))
+          return json(res,401,{error:{code:"enrollment_service_unauthorized"}});
+        return json(res,200,{status:"ok",enrollment_enabled:customConfig.enrollmentEnabled===true,
+          meta_configured:Boolean(customConfig.metaGraphVersion&&customConfig.metaAccessToken),
+          evolution_configured:Boolean(customConfig.evolutionBaseUrl&&customConfig.evolutionApiKey),
+          external_send_enabled:customConfig.externalSendEnabled});
+      }
+      if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/enrollment/execute") {
+        if (!sameSecret(req.headers["x-enrollment-service-key"],customConfig.adapterServiceToken))
+          return json(res,401,{error:{code:"enrollment_service_unauthorized"}});
+        const raw=await readBody(req);
+        let data;try{data=JSON.parse(raw.toString("utf8")||"{}");}catch{throw new EnrollmentError("invalid_json",400);}
+        const result=await enrollment.execute(data.action,data.input);
+        return json(res,200,{status:"ok",result});
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/transport/health") {
@@ -135,11 +154,11 @@ export function createApp(customConfig = loadConfig()) {
 
       return json(res, 404, { error: { code: "not_found" } });
     } catch (error) {
-      const status = error instanceof ProviderError ? error.status : 500;
+      const status = error instanceof ProviderError || error instanceof EnrollmentError ? error.status : 500;
       return json(res, status, {
         error: {
           code: error.code || "internal_error",
-          message: error.message,
+          message: error instanceof EnrollmentError ? error.code : error.message,
           retry_hint: error.retryHint || "middleware_decides"
         },
         correlation_id: correlationId
