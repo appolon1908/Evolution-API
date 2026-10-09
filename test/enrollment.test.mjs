@@ -6,7 +6,7 @@ import { loadConfig } from "../src/config.mjs";
 import { once } from "node:events";
 
 const secret="test-long-private-enrollment-service-key";
-function config(env={}) {return loadConfig({ADAPTER_SERVICE_TOKEN:secret,META_GRAPH_VERSION:"v23.0",META_ACCESS_TOKEN:"private-meta-token",EVOLUTION_BASE_URL:"https://evolution.example",EVOLUTION_API_KEY:"private-evolution-key",...env});}
+function config(env={}) {return loadConfig({ADAPTER_SERVICE_TOKEN:secret,META_GRAPH_VERSION:"v23.0",META_ACCESS_TOKEN:"private-meta-token",EVOLUTION_BASE_URL:"https://evolution.example",EVOLUTION_API_KEY:"private-evolution-key",META_ALLOWED_WABA_IDS:"987654321",EVOLUTION_INSTANCE_PREFIX:"sales-",...env});}
 async function withApi(c,fn,overrides={}){
  const srv=createApp(c,overrides);srv.listen(0,"127.0.0.1");await once(srv,"listening");
  try{await fn("http://127.0.0.1:"+srv.address().port);} finally{srv.close();await once(srv,"close");}
@@ -23,14 +23,14 @@ test("enrollment endpoint requires service key and defaults to effects OFF",asyn
 });
 test("Meta code request, verification and registration have exact fields and redact tokens",async()=>{
  const calls=[];
- const mocked=async(url,init)=>{calls.push({url,init});return {ok:true,json:async()=>({success:true})};};
+ const mocked=async(url,init)=>{calls.push({url,init});return {ok:true,json:async()=>url.endsWith("/phone_numbers")?{data:[{id:"12345678901"}]}:{success:true}};};
  const client=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),mocked);
- const params={phone_number_id:"12345678901"};
+ const params={phone_number_id:"12345678901",waba_id:"987654321"};
  assert.deepEqual(await client.execute("meta.request-code",{...params,method:"SMS",language:"en_US"}),{accepted:true});
  assert.deepEqual(await client.execute("meta.verify-code",{...params,code:"123456"}),{accepted:true});
  assert.deepEqual(await client.execute("meta.register",{...params,pin:"654321"}),{accepted:true});
- assert.deepEqual(calls.map(x=>new URL(x.url).pathname),["/v23.0/12345678901/request_code","/v23.0/12345678901/verify_code","/v23.0/12345678901/register"]);
- assert.deepEqual(calls.map(x=>JSON.parse(x.init.body)),[{code_method:"SMS",language:"en_US"},{code:"123456"},{messaging_product:"whatsapp",pin:"654321"}]);
+ assert.deepEqual(calls.map(x=>new URL(x.url).pathname),["/v23.0/987654321/phone_numbers","/v23.0/12345678901/request_code","/v23.0/987654321/phone_numbers","/v23.0/12345678901/verify_code","/v23.0/987654321/phone_numbers","/v23.0/12345678901/register"]);
+ assert.deepEqual(calls.filter(x=>x.init.method==="POST").map(x=>JSON.parse(x.init.body)),[{code_method:"SMS",locale:"en_US"},{code:"123456"},{messaging_product:"whatsapp",pin:"654321"}]);
  assert.equal(calls[0].init.headers.authorization,"Bearer private-meta-token");
  assert.ok(!JSON.stringify(await client.execute("meta.request-code",{...params,method:"VOICE",language:"en_US"})).includes("private-meta"));
 });
@@ -62,6 +62,22 @@ test("reject invalid user controlled IDs and never fetch when enrollment disable
 
 test("bare base64 image from Evolution is normalized for QR display",async()=>{
  const client=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),async()=>({ok:true,json:async()=>({base64:"B".repeat(180)})}));
- const qr=await client.execute("evolution.qr",{instance_name:"test-instance"});
+ const qr=await client.execute("evolution.qr",{instance_name:"sales-test-instance"});
  assert.equal(qr.qr_image,"data:image/png;base64,"+"B".repeat(180));
+});
+
+test("Meta enrollment denies unapproved WABA and mismatched phone IDs before any provider effect",async()=>{
+ let calls=0;
+ const unapproved=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),async()=>{calls++;throw Error("must not call");});
+ await assert.rejects(unapproved.execute("meta.request-code",{waba_id:"888888888",phone_number_id:"12345678901",method:"SMS",language:"en_US"}),e=>e.code==="waba_not_authorized");
+ assert.equal(calls,0);
+ const mismatch=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),async()=>{calls++;return {ok:true,json:async()=>({data:[{id:"00000000000"}]})};});
+ await assert.rejects(mismatch.execute("meta.request-code",{waba_id:"987654321",phone_number_id:"12345678901",method:"SMS",language:"en_US"}),e=>e.code==="phone_not_in_authorized_waba");
+ assert.equal(calls,1);
+});
+test("Evolution only permits configured instance namespace for managed pairing",async()=>{
+ let calls=0;
+ const client=createEnrollmentClient(config({PROVIDER_ENROLLMENT_ENABLED:"true"}),async()=>{calls++;throw Error("must not call");});
+ await assert.rejects(client.execute("evolution.create",{instance_name:"other-company"}),e=>e.code==="evolution_instance_namespace_denied");
+ assert.equal(calls,0);
 });
