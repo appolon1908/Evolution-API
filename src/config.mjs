@@ -18,6 +18,8 @@ export function loadConfig(env = process.env) {
     evolutionApiKey: env.EVOLUTION_API_KEY || "",
     evolutionWebhookSecret: env.EVOLUTION_WEBHOOK_SECRET || "",
     metaGraphVersion: env.META_GRAPH_VERSION || "",
+    metaAllowedWabaIds: String(env.META_ALLOWED_WABA_IDS || "").split(",").map(x=>x.trim()).filter(Boolean),
+    evolutionInstancePrefix: env.EVOLUTION_INSTANCE_PREFIX || "",
     metaPhoneNumberId: env.META_PHONE_NUMBER_ID || "",
     metaAccessToken: env.META_ACCESS_TOKEN || "",
     metaAppSecret: env.META_APP_SECRET || "",

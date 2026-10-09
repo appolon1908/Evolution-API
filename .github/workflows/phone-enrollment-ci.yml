@@ -1,9 +1,9 @@
 name: Codestra Phone Enrollment CI
 on:
   pull_request:
-    branches: ["fix/cli-entrypoint-development-20261008", development]
+    branches: ["fix/cli-entrypoint-development-20261008", "feat/phone-enrollment-staging-20261008", development]
   push:
-    branches: ["feat/phone-enrollment-staging-20261008"]
+    branches: ["feat/phone-enrollment-staging-20261008", "hardening/phone-production-readiness-20261008"]
   workflow_dispatch:
 
 permissions:
