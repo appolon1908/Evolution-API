@@ -48,10 +48,17 @@ export function createApp(customConfig = loadConfig()) {
       }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
-        return json(res, 200, {
-          status: "ready",
+        // A provider configured to send whose webhook secret is empty would reject
+        // every status webhook (fail closed), so readback could never complete:
+        // report not-ready instead of silently 401-ing provider callbacks.
+        const webhooks = webhookReadiness(customConfig);
+        const blocking = Object.keys(providers).filter((k) => providers[k].ready() && !webhooks[k].configured);
+        return json(res, blocking.length ? 503 : 200, {
+          status: blocking.length ? "not_ready" : "ready",
           safe_mode: !customConfig.externalSendEnabled,
-          providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }]))
+          providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }])),
+          webhooks,
+          ...(blocking.length ? { reasons: blocking.map((k) => `${k}_webhook_secret_missing`) } : {})
         });
       }
 
@@ -114,7 +121,7 @@ export function createApp(customConfig = loadConfig()) {
         const mode = url.searchParams.get("hub.mode");
         const token = url.searchParams.get("hub.verify_token");
         const challenge = url.searchParams.get("hub.challenge");
-        if (mode === "subscribe" && customConfig.metaVerifyToken && token === customConfig.metaVerifyToken) {
+        if (mode === "subscribe" && verifySharedSecret(customConfig.metaVerifyToken, token)) {
           res.writeHead(200, { "content-type": "text/plain" });
           return res.end(challenge || "");
         }
@@ -154,6 +161,13 @@ function internalAuthError(req, config) {
   const actual = authorization.slice("Bearer ".length);
   if (!verifySharedSecret(config.adapterServiceToken, actual)) return { status: 401, code: "service_auth_invalid" };
   return null;
+}
+
+function webhookReadiness(config) {
+  return {
+    evolution: { configured: Boolean(config.evolutionWebhookSecret) },
+    meta: { configured: Boolean(config.metaAppSecret), verify_token_configured: Boolean(config.metaVerifyToken) }
+  };
 }
 
 function cryptoRandom() {
