@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { once } from "node:events";
 import { createApp } from "../src/server.mjs";
 import { loadConfig } from "../src/config.mjs";
+import { createMessageState } from "../src/state.mjs";
 
 // Synthetic test-only values; never real credentials.
 export const APP_SECRET = "test-meta-app-secret-not-real";
@@ -29,18 +30,24 @@ export function metaStatusBody(id, status, timestamp = "1700000000") {
   });
 }
 
+// Test-side handle on each server's state, keyed by base URL. Webhook-only
+// records carry no tenant and are deliberately not readable over HTTP.
+const states = new Map();
+
 export async function withServer(env, fn) {
+  const state = createMessageState();
   const server = createApp(loadConfig({
     PORT: "0",
     EXTERNAL_SEND_ENABLED: "false",
     FORWARD_EVENTS_ENABLED: "false",
     ADAPTER_SERVICE_TOKEN: SERVICE_TOKEN,
     ...env
-  }));
+  }), { state });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
-  try { await fn(base); } finally { server.close(); await once(server, "close"); }
+  states.set(base, state);
+  try { await fn(base, state); } finally { states.delete(base); server.close(); await once(server, "close"); }
 }
 
 export async function postMeta(base, raw, signature) {
@@ -50,8 +57,13 @@ export async function postMeta(base, raw, signature) {
 }
 
 export async function readState(base, id) {
-  const res = await fetch(base + "/internal/v1/whatsapp/transport/messages/" + encodeURIComponent(id), {
-    headers: { authorization: `Bearer ${SERVICE_TOKEN}` }
-  });
+  const record = states.get(base).get(id);
+  return record ? { status: 200, body: record } : { status: 404, body: null };
+}
+
+export async function readback(base, id, tenantId) {
+  const headers = { authorization: `Bearer ${SERVICE_TOKEN}` };
+  if (tenantId !== undefined) headers["x-tenant-id"] = tenantId;
+  const res = await fetch(base + "/internal/v1/whatsapp/transport/messages/" + encodeURIComponent(id), { headers });
   return { status: res.status, body: await res.json() };
 }

@@ -3,13 +3,15 @@
 
   // A status webhook can arrive before provider.send() returns; never let the
   // send acknowledgement regress a state that is already further along.
-  function rememberAccepted(result) {
+  // tenantId: the tenant of the authenticated send request; readback is bound to it.
+  function rememberAccepted(result, { tenantId = null } = {}) {
     const id = result?.provider_message_id;
     if (!id) return;
     const existing = messages.get(String(id));
     messages.set(String(id), {
       ...existing,
       provider_message_id: String(id),
+      tenant_id: existing?.tenant_id ?? tenantId ?? null,
       provider: result.provider ?? existing?.provider ?? null,
       state: existing?.state ?? "ACCEPTED",
       updated_at: existing?.updated_at ?? new Date().toISOString()
@@ -43,7 +45,15 @@
     return messages.get(String(id)) ?? null;
   }
 
-  return Object.freeze({ rememberAccepted, applyEvent, get });
+  // Tenant-scoped readback: records with no tenant (e.g. webhook-only, never
+  // sent through this adapter) or another tenant's records are not visible.
+  function getForTenant(id, tenantId) {
+    const record = get(id);
+    if (!record || !tenantId || record.tenant_id !== tenantId) return null;
+    return record;
+  }
+
+  return Object.freeze({ rememberAccepted, applyEvent, get, getForTenant });
 }
 
 const STATE_RANK = Object.freeze({ ACCEPTED: 0, SENT: 1, DELIVERED: 2, READ: 3 });

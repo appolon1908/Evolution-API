@@ -25,8 +25,7 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-export function createApp(customConfig = loadConfig()) {
-  const state = createMessageState();
+export function createApp(customConfig = loadConfig(), { state = createMessageState() } = {}) {
   const providers = {
     evolution: createEvolutionProvider(customConfig),
     meta: createMetaProvider(customConfig)
@@ -85,10 +84,11 @@ export function createApp(customConfig = loadConfig()) {
             correlation_id: body.correlation_id
           });
         }
+        const tenantId = sendTenant(req, body);
         const provider = providers[providerName];
         if (!provider) throw new ProviderError("unknown_provider", `unknown provider: ${providerName}`, { status: 400, retryHint: "never" });
         const result = await provider.send(body);
-        state.rememberAccepted(result);
+        state.rememberAccepted(result, { tenantId });
         return json(res, 202, {
           command_id: body.command_id,
           correlation_id: body.correlation_id,
@@ -100,8 +100,11 @@ export function createApp(customConfig = loadConfig()) {
       if (req.method === "GET" && url.pathname.startsWith("/internal/v1/whatsapp/transport/messages/")) {
         const authError = internalAuthError(req, customConfig);
         if (authError) return json(res, authError.status, { error: { code: authError.code } });
+        const tenantId = headerTenant(req);
+        if (!tenantId) return json(res, 400, { error: { code: "tenant_id_required" } });
         const id = decodeURIComponent(url.pathname.slice("/internal/v1/whatsapp/transport/messages/".length));
-        const record = state.get(id);
+        // Unknown id and another tenant's id are indistinguishable (no existence oracle).
+        const record = state.getForTenant(id, tenantId);
         if (!record) return json(res, 404, { error: { code: "provider_message_not_found" } });
         return json(res, 200, record);
       }
@@ -161,6 +164,21 @@ function internalAuthError(req, config) {
   const actual = authorization.slice("Bearer ".length);
   if (!verifySharedSecret(config.adapterServiceToken, actual)) return { status: 401, code: "service_auth_invalid" };
   return null;
+}
+
+function headerTenant(req) {
+  const raw = req.headers["x-tenant-id"];
+  return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null;
+}
+
+// The send request must carry X-Tenant-ID; a body tenant_id, when present, must agree.
+function sendTenant(req, body) {
+  const tenantId = headerTenant(req);
+  if (!tenantId) throw new ProviderError("tenant_id_required", "X-Tenant-ID is required", { status: 400, retryHint: "never" });
+  if (body.tenant_id != null && (typeof body.tenant_id !== "string" || body.tenant_id.trim() !== tenantId)) {
+    throw new ProviderError("tenant_mismatch", "X-Tenant-ID and body tenant_id disagree", { status: 400, retryHint: "never" });
+  }
+  return tenantId;
 }
 
 function webhookReadiness(config) {
