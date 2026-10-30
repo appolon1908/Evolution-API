@@ -105,9 +105,9 @@ export function createApp(customConfig = loadConfig()) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
         const event = normalizeEvolutionWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        state.applyEvent(event);
+        const { duplicate, stale } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
@@ -127,9 +127,9 @@ export function createApp(customConfig = loadConfig()) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
         const event = normalizeMetaWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        state.applyEvent(event);
+        const { duplicate, stale } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
       }
 
       return json(res, 404, { error: { code: "not_found" } });

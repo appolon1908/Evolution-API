@@ -12,18 +12,26 @@
     });
   }
 
+  // Provider webhooks may be redelivered and arrive out of order. A status
+  // only moves forward (ACCEPTED < SENT < DELIVERED < READ); READ and FAILED
+  // are terminal; FAILED may replace a non-terminal state.
   function applyEvent(event) {
     const id = event?.provider_message_id ?? event?.provider_event_id;
-    if (!id) return;
-    const current = messages.get(String(id)) ?? {
+    if (!id) return { applied: false, duplicate: false, stale: false };
+    const existing = messages.get(String(id));
+    const next = deriveState(event);
+    if (existing?.state === next) return { applied: false, duplicate: true, stale: false };
+    if (existing && !advances(existing.state, next)) return { applied: false, duplicate: false, stale: true };
+    const current = existing ?? {
       provider_message_id: String(id),
       provider: event?.source ?? null
     };
     messages.set(String(id), {
       ...current,
-      state: deriveState(event),
+      state: next,
       updated_at: new Date().toISOString()
     });
+    return { applied: true, duplicate: false, stale: false };
   }
 
   function get(id) {
@@ -31,6 +39,15 @@
   }
 
   return Object.freeze({ rememberAccepted, applyEvent, get });
+}
+
+const STATE_RANK = Object.freeze({ ACCEPTED: 0, SENT: 1, DELIVERED: 2, READ: 3 });
+const TERMINAL_STATES = new Set(["READ", "FAILED"]);
+
+function advances(current, next) {
+  if (TERMINAL_STATES.has(current)) return false;
+  if (next === "FAILED") return true;
+  return (STATE_RANK[next] ?? -1) > (STATE_RANK[current] ?? -1);
 }
 
 function deriveState(event) {
