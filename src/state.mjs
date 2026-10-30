@@ -1,20 +1,25 @@
 ﻿export function createMessageState() {
   const messages = new Map();
 
+  // A status webhook can arrive before provider.send() returns; never let the
+  // send acknowledgement regress a state that is already further along.
   function rememberAccepted(result) {
     const id = result?.provider_message_id;
     if (!id) return;
+    const existing = messages.get(String(id));
     messages.set(String(id), {
+      ...existing,
       provider_message_id: String(id),
-      provider: result.provider ?? null,
-      state: "ACCEPTED",
-      updated_at: new Date().toISOString()
+      provider: result.provider ?? existing?.provider ?? null,
+      state: existing?.state ?? "ACCEPTED",
+      updated_at: existing?.updated_at ?? new Date().toISOString()
     });
   }
 
   // Provider webhooks may be redelivered and arrive out of order. A status
   // only moves forward (ACCEPTED < SENT < DELIVERED < READ); READ and FAILED
-  // are terminal; FAILED may replace a non-terminal state.
+  // are terminal; FAILED may replace only a pre-delivery state (ACCEPTED,
+  // SENT): a message the recipient device already received cannot be undone.
   function applyEvent(event) {
     const id = event?.provider_message_id ?? event?.provider_event_id;
     if (!id) return { applied: false, duplicate: false, stale: false };
@@ -46,7 +51,7 @@ const TERMINAL_STATES = new Set(["READ", "FAILED"]);
 
 function advances(current, next) {
   if (TERMINAL_STATES.has(current)) return false;
-  if (next === "FAILED") return true;
+  if (next === "FAILED") return (STATE_RANK[current] ?? -1) < STATE_RANK.DELIVERED;
   return (STATE_RANK[next] ?? -1) > (STATE_RANK[current] ?? -1);
 }
 
