@@ -1,12 +1,19 @@
 ﻿import crypto from "node:crypto";
 
 // Fail closed: an unconfigured (missing or empty) secret never authenticates.
+// Constant-time in both lengths and configuration: both sides are hashed to
+// 32-byte SHA-256 digests and compared with one timingSafeEqual on every
+// path. An unconfigured expected value (e.g. an unknown Evolution instance)
+// is replaced by a random per-process dummy, so it costs the same as a known
+// one and neither secret length nor instance existence shows in timing.
+const DUMMY_SECRET = crypto.randomBytes(32).toString("hex");
+const digest = (value) => crypto.createHash("sha256").update(value, "utf8").digest();
+
 export function verifySharedSecret(expected, actual) {
-  if (typeof expected !== "string" || expected === "") return false;
-  if (typeof actual !== "string" || actual === "") return false;
-  const a = Buffer.from(expected);
-  const b = Buffer.from(actual);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  const configured = typeof expected === "string" && expected !== "";
+  const presented = typeof actual === "string" && actual !== "";
+  const equal = crypto.timingSafeEqual(digest(configured ? expected : DUMMY_SECRET), digest(presented ? actual : ""));
+  return configured && presented && equal;
 }
 
 // Meta: X-Hub-Signature-256 = "sha256=" + hex(HMAC-SHA256(app_secret, raw request body)).
