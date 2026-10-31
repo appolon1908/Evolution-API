@@ -108,7 +108,12 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (authError) return json(res, authError.status, { error: { code: authError.code } });
         const tenantId = headerTenant(req);
         if (!tenantId) return json(res, 400, { error: { code: "tenant_id_required" } });
-        const id = decodeURIComponent(url.pathname.slice("/internal/v1/whatsapp/transport/messages/".length));
+        let id;
+        try {
+          id = decodeURIComponent(url.pathname.slice("/internal/v1/whatsapp/transport/messages/".length));
+        } catch {
+          return json(res, 400, { error: { code: "invalid_provider_message_id" } });
+        }
         // Unknown id and another tenant's id are indistinguishable (no existence oracle).
         const record = state.getForTenant(id, tenantId);
         if (!record) return json(res, 404, { error: { code: "provider_message_not_found" } });

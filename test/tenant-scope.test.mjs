@@ -322,3 +322,17 @@ test("evolution webhook HTTP: PENDING on a sent message reports unrecognized, no
     });
   });
 });
+
+// --- (f) readback path decoding ----------------------------------------------
+
+test("readback: malformed percent-encoding in the path returns 400, not 500", async () => {
+  await withServer({}, async (base) => {
+    for (const bad of ["%E0", "%", "abc%zz"]) {
+      const res = await fetch(base + "/internal/v1/whatsapp/transport/messages/" + bad, {
+        headers: { authorization: `Bearer ${SERVICE_TOKEN}`, "x-tenant-id": "tenant-a" }
+      });
+      assert.equal(res.status, 400, bad);
+      assert.equal((await res.json()).error.code, "invalid_provider_message_id");
+    }
+  });
+});
