@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isSecretKey, redactSecrets, secretKeyCacheSize, SECRET_KEY_CACHE_MAX, REDACTED } from "../src/webhooks.mjs";
-import { assertLinear, LIMIT_MS, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
+import { timeInWorker, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
 
 // R1 go-live v3 nit: isSecretKey is memoized per name with a bounded cache.
 // Memoization must not change any result.
@@ -62,6 +62,25 @@ test("memoized isSecretKey: redaction output is unchanged", () => {
 });
 
 // Repeated non-empty query parameters call isSecretKey once each; with the
-// cache the name is classified once (64K x "a=1&": ~100 ms uncached).
-test(`redaction: 64K repeated query parameters under ${LIMIT_MS} ms`, TIMING_TEST_OPTIONS, () =>
-  assertLinear("repeated query params", "redactSecrets", { text: "see ?" + "a=1&".repeat(64 * 1024) }));
+// cache the name is classified once. Load-robust: the cached and uncached
+// (bypassed) paths are timed interleaved in one worker, so both see the same
+// load, and the cached path must be markedly faster (idle: ~22 vs ~130 ms).
+// The absolute ceiling is generous but still far below super-linear
+// behaviour, which the 5 s worker deadline also cuts.
+const REPEATED_PARAMS = { text: "see ?" + "a=1&".repeat(64 * 1024) };
+const CEILING_MS = 2000;
+const MAX_RATIO = 0.5;
+
+test(`redaction: 64K repeated query parameters, cached path markedly faster than uncached`, TIMING_TEST_OPTIONS, async () => {
+  let cached, uncached;
+  try {
+    [cached, uncached] = await timeInWorker("redactSecrets", REPEATED_PARAMS, {
+      variants: [null, ["setSecretKeyCacheEnabledForTests", false]],
+      runs: 5
+    });
+  } catch (err) {
+    assert.fail(`repeated query params: ${err.message}`);
+  }
+  assert.ok(cached < CEILING_MS, `cached: ${cached.toFixed(1)} ms (ceiling ${CEILING_MS} ms)`);
+  assert.ok(cached < uncached * MAX_RATIO, `cached ${cached.toFixed(1)} ms vs uncached ${uncached.toFixed(1)} ms (ratio limit ${MAX_RATIO})`);
+});
