@@ -20,22 +20,66 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-// Field names that carry credentials. Upstream Evolution puts the instance
-// `apikey` in every webhook body; never echo or forward such values. Matches
-// whole-word credential markers only, so message `key` objects survive.
-const SECRET_FIELD = /(api[-_]?key|token|secret|passw(or)?d|authorization|jwt|credential|private[-_]?key)/i;
+// Credential redaction for provider payloads that are echoed and forwarded.
+// Upstream Evolution puts the instance `apikey` in every webhook body.
+//
+// Key rule: a key is split into tokens on "_", "-", ".", whitespace and
+// camelCase/acronym boundaries, then lowercased ("x-api-key" -> x|api|key,
+// "accessToken" -> access|token, "APIKEY" -> apikey). It is a credential key if
+//   - any token is one of SECRET_TOKENS (whole-token match, so "author",
+//     "passport", "keyboard", "secretary" and a bare message `key` survive), or
+//   - two adjacent tokens are api+key or private+key;
+//   - EXCEPT when the only credential token is "token" and another token is a
+//     counter word (COUNTER_TOKENS), e.g. token_count, tokenCount. The plural
+//     "tokens" is not a credential token (total_tokens, max_tokens, tokens).
+// Value rule: any string that looks like a JWT (optionally "Bearer "-prefixed)
+// is redacted under any key: three base64url segments separated by "." where
+// the first starts with "eyJ" (a base64url-encoded JSON header).
+const SECRET_TOKENS = new Set([
+  "apikey", "token", "accesstoken", "authtoken", "refreshtoken", "idtoken",
+  "secret", "clientsecret", "password", "passwd", "pwd", "pass",
+  "auth", "authorization", "bearer", "jwt", "credential", "credentials", "privatekey"
+]);
+const SECRET_PAIRS = [["api", "key"], ["private", "key"]];
+const COUNTER_TOKENS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
+const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*$/;
 export const REDACTED = "[REDACTED]";
+
+function keyTokens(key) {
+  return String(key)
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+export function isSecretKey(key) {
+  const tokens = keyTokens(key);
+  const hits = tokens.filter((t) => SECRET_TOKENS.has(t));
+  const pair = tokens.some((t, i) => SECRET_PAIRS.some(([a, b]) => t === a && tokens[i + 1] === b));
+  if (pair) return true;
+  if (hits.length === 0) return false;
+  if (hits.every((t) => t === "token") && tokens.some((t) => COUNTER_TOKENS.has(t))) return false;
+  return true;
+}
+
+export function looksLikeJwt(value) {
+  if (typeof value !== "string") return false;
+  return JWT_VALUE.test(value.trim().replace(/^bearer\s+/i, ""));
+}
 
 const MAX_REDACT_DEPTH = 32;
 
 export function redactSecrets(value, depth = 0) {
+  if (looksLikeJwt(value)) return REDACTED;
   if (value === null || typeof value !== "object") return value;
   // Fail closed: a subtree deeper than we inspect is replaced, never echoed.
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
   if (Array.isArray(value)) return value.map((item) => redactSecrets(item, depth + 1));
   const out = {};
   for (const [k, v] of Object.entries(value)) {
-    out[k] = SECRET_FIELD.test(k) && v != null && v !== "" ? REDACTED : redactSecrets(v, depth + 1);
+    out[k] = isSecretKey(k) && v != null && v !== "" ? REDACTED : redactSecrets(v, depth + 1);
   }
   return out;
 }
