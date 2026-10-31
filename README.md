@@ -35,7 +35,9 @@ Each instance has its own secret, configured as a JSON object `{"<instanceName>"
 - `EVOLUTION_WEBHOOK_SECRETS_FILE`: path to a file with that JSON (preferred: a mounted secret file rendered from the secret store), or
 - `EVOLUTION_WEBHOOK_SECRETS`: the same JSON inline.
 
-Setting both is a configuration error. Instance names are compared trimmed; every secret must be a non-blank string. The header is compared in constant time with the secret of the instance named in the body (`instance`, else `instanceName`) **before** anything is applied, forwarded or logged. An unmapped instance, a missing or wrong header and an unparseable body all get the same `401 invalid_webhook_secret`. Even with a valid secret, an event for another instance's message is ignored by the state scope check.
+Setting both is a configuration error. Instance names are compared trimmed; every secret must be a non-blank string.
+
+The map is read **once at startup**: rotating or adding an instance secret requires a restart (roll replicas one at a time, and set the new secret in Evolution's per-instance webhook headers in the same window). The adapter does not check the file's permissions; mount it read-only and owned by the adapter's user with mode `0600` (or `0400`), never world-readable. The header is compared in constant time with the secret of the instance named in the body (`instance`, else `instanceName`) **before** anything is applied, forwarded or logged. An unmapped instance, a missing or wrong header and an unparseable body all get the same `401 invalid_webhook_secret`. Even with a valid secret, an event for another instance's message is ignored by the adapter's in-memory state scope check, **but it is still forwarded** to Middleware (with `FORWARD_EVENTS_ENABLED=true`). Middleware must therefore scope every forwarded event itself: join on `(provider, event.instance_id, provider_message_id)` against its own command row and drop events whose `instance_id` does not match. Use `event.instance_id` (the trimmed instance whose secret was verified), never `provider_payload.data.instanceId` (Evolution's internal UUID, not authenticated).
 
 The legacy single `EVOLUTION_WEBHOOK_SECRET` is honoured only when `EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET=true` (default `false`), and then only for instances that have no secret of their own. Existing deployments that set only `EVOLUTION_WEBHOOK_SECRET` therefore reject every Evolution webhook (fail closed) until they configure the map or opt in; `/readyz` warns `evolution_webhook_legacy_secret_ignored` in that case.
 
@@ -70,6 +72,10 @@ These are a backstop, not the primary control. At the ingress (reverse proxy / l
 - `<provider>_webhook_secret_missing`, the Evolution secret-map codes (see above).
 
 Non-blocking `warnings`: `meta_verify_token_missing` (only matters when (re)subscribing the Meta webhook) and `evolution_webhook_legacy_secret_ignored`.
+
+## Known limitation: tenantless records from inbound receipts
+
+Evolution also sends `messages.update` for messages the business *received* (`data.fromMe === false`, e.g. our read receipts of inbound messages). These apply to the in-memory state as webhook-only records with no tenant: they are never readable through readback, but the in-memory map grows with inbound traffic and is not evicted (state is process-local and lost on restart anyway). Follow-up, not done here: skip state for `fromMe === false` while still forwarding.
 
 ## Open question: media keys
 
