@@ -1,12 +1,25 @@
-import test from "node:test";
+import nodeTest from "node:test";
 import assert from "node:assert/strict";
 import { EVOLUTION_SECRET, withServer, readState } from "./webhook-helpers.mjs";
 
 // E1 T9: duplicate and stale/out-of-order Evolution webhooks over HTTP cannot
 // regress a terminal status (ordering was only HTTP-tested for Meta).
 
+// Two id shapes: data.key.id (messages.upsert-style) and the upstream
+// messages.update shape, data.keyId plus a DB row id in data.messageId
+// (EvolutionAPI/evolution-api whatsapp.baileys.service.ts L1613-1621, L1652).
+const SHAPES = {
+  "key.id": (id, status, instance) => ({ event: "messages.update", instance, data: { key: { id, remoteJid: "15550000000@s.whatsapp.net", fromMe: true }, status } }),
+  keyId: (id, status, instance) => ({
+    event: "messages.update", instance,
+    data: { keyId: id, remoteJid: "15550000000@s.whatsapp.net", fromMe: true, status, instanceId: "8a1b2c3d-0000-4000-8000-000000000001", messageId: `db-cuid-${status}` },
+    destination: "http://127.0.0.1:9/hook", date_time: "2026-10-30T12:00:00.000Z", sender: "15550001111@s.whatsapp.net", server_url: "http://127.0.0.1:9", apikey: "test-not-real"
+  })
+};
+let shape = SHAPES["key.id"];
+
 function evolutionStatus(id, status, instance = "inst-1") {
-  return JSON.stringify({ event: "messages.update", instance, data: { key: { id, remoteJid: "15550000000@s.whatsapp.net", fromMe: true }, status } });
+  return JSON.stringify(shape(id, status, instance));
 }
 
 async function postEvolution(base, raw) {
@@ -19,6 +32,13 @@ async function postEvolution(base, raw) {
 }
 
 const env = { EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET };
+
+// Every ordering test runs once per id shape.
+function test(name, fn) {
+  for (const [shapeName, build] of Object.entries(SHAPES)) {
+    nodeTest(`${name} [${shapeName}]`, async () => { shape = build; await fn(); });
+  }
+}
 
 test("evolution webhook: duplicate delivery is acknowledged idempotently", async () => {
   await withServer(env, async (base) => {

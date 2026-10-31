@@ -202,8 +202,12 @@ export function redactSecrets(value, depth = 0) {
   return out;
 }
 
+// The WhatsApp message id: data.key.id (messages.upsert / send results) or
+// data.keyId (upstream messages.update, whatsapp.baileys.service.ts). Never
+// data.messageId: on messages.update that is Evolution's database row id,
+// not the WhatsApp id the send acknowledgement returned.
 export function normalizeEvolutionWebhook(body) {
-  const providerEventId = body?.data?.key?.id ?? body?.data?.id ?? body?.id ?? null;
+  const providerEventId = body?.data?.key?.id ?? body?.data?.keyId ?? body?.data?.id ?? body?.id ?? null;
   return {
     source: "evolution",
     provider_event_id: providerEventId,
