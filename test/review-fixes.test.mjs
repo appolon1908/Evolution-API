@@ -284,3 +284,58 @@ test("redaction v3: eyJ inside a longer word is not a JWT; ordinary text is kept
     assert.equal(redactSecrets({ v }).v, v, v);
   }
 });
+
+// --- R1 v2 nit 4b: skipped Meta items are counted in a secret-safe log ------
+
+test("meta webhook: skipped items, non-message fields and value-level errors are logged as counts only, still 200", async () => {
+  const received = [];
+  await withLoopback(slowMiddleware(0, received), async (mw) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: mw + "/events" }, async (base, _state, logs) => {
+      const planted = "planted-detail-not-for-logs";
+      const raw = JSON.stringify({
+        object: "whatsapp_business_account",
+        entry: [{
+          id: "waba-test",
+          changes: [
+            { field: "messages", value: { metadata: { phone_number_id: "pn-test" }, statuses: [{ status: "delivered" }, { id: "wamid.ok4b", status: "delivered", timestamp: "1700000000" }] } },
+            { field: "account_update", value: { event: "VERIFIED_ACCOUNT", detail: planted } },
+            { field: "messages", value: { metadata: { phone_number_id: "pn-test" }, errors: [{ code: 131000, title: planted }, { code: 131001, message: planted }] } },
+            { field: "weird field<script>", value: {} }
+          ]
+        }]
+      });
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.equal(res.status, 200);
+      assert.equal(received.length, 1);
+      const line = logs.find((l) => l.event === "meta_webhook_items_skipped");
+      assert.ok(line, "skip summary logged");
+      assert.deepEqual(line, {
+        event: "meta_webhook_items_skipped",
+        source: "meta",
+        no_provider_message_id: 1,
+        skipped_fields: { account_update: 1, messages: 1, other: 1 },
+        value_errors: 2
+      });
+      assert.ok(!JSON.stringify(logs).includes(planted));
+    });
+  });
+});
+
+test("meta webhook: a fully id-less notification is logged and acknowledged 200", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base, _state, logs) => {
+    const raw = JSON.stringify({ object: "whatsapp_business_account", entry: [{ id: "waba-test", changes: [{ field: "account_update", value: { event: "VERIFIED_ACCOUNT" } }] }] });
+    const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+    assert.equal(res.status, 200);
+    const line = logs.find((l) => l.event === "meta_webhook_items_skipped");
+    assert.equal(line.no_provider_message_id, 1);
+    assert.deepEqual(line.skipped_fields, { account_update: 1 });
+  });
+});
+
+test("meta webhook: nothing is logged when every item has an id", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base, _state, logs) => {
+    const raw = metaBatch([{ id: "wamid.clean", status: "delivered", timestamp: "1700000000" }]);
+    assert.equal((await postMeta(base, raw, sign(APP_SECRET, raw))).status, 200);
+    assert.equal(logs.filter((l) => l.event === "meta_webhook_items_skipped").length, 0);
+  });
+});

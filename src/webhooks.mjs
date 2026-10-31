@@ -167,6 +167,27 @@ export function normalizeMetaWebhookEvents(body) {
   return events;
 }
 
+// Secret-safe summary of what a Meta webhook carried that yields no
+// forwardable item: changes with no messages/statuses, counted by field name
+// (Meta field names only; anything else is "other"), and the number of
+// value-level errors. Counts and field names only, never values.
+export function summarizeMetaSkips(body) {
+  const skippedFields = {};
+  let valueErrors = 0;
+  for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
+    for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
+      const value = change?.value ?? {};
+      if (Array.isArray(value?.errors)) valueErrors += value.errors.length;
+      const items = (Array.isArray(value?.messages) ? value.messages.length : 0) + (Array.isArray(value?.statuses) ? value.statuses.length : 0);
+      if (items === 0) {
+        const field = typeof change?.field === "string" && /^[a-z0-9_]{1,64}$/.test(change.field) ? change.field : "other";
+        skippedFields[field] = (skippedFields[field] ?? 0) + 1;
+      }
+    }
+  }
+  return { skippedFields, valueErrors };
+}
+
 function metaEvent(value, item, eventType, payload) {
   return {
     source: "meta",

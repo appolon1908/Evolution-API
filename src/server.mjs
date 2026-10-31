@@ -4,7 +4,7 @@ import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
-import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
+import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
 import { createMessageState, defaultLogger } from "./state.mjs";
 
 const MAX_BODY = 1024 * 1024;
@@ -168,6 +168,14 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         // redelivers instead of the batch running for up to N x 10 s.
         // Items with no message/status id carry nothing Middleware can join on:
         // they are not applied or forwarded and are counted as ignored.
+        // Id-less items, non-message fields and value-level errors are
+        // not forwarded; record counts only, before forwarding so the line is
+        // emitted even if the forward deadline is hit.
+        const noId = events.filter((e) => e.provider_message_id == null).length;
+        const { skippedFields, valueErrors } = summarizeMetaSkips(parsed);
+        if (noId > 0 || valueErrors > 0 || Object.keys(skippedFields).length > 0) {
+          logger({ event: "meta_webhook_items_skipped", source: "meta", no_provider_message_id: noId, skipped_fields: skippedFields, value_errors: valueErrors });
+        }
         const deadline = Date.now() + customConfig.webhookForwardDeadlineMs;
         const results = [];
         for (const event of events) {
