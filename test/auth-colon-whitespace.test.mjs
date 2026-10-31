@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { redactSecrets, REDACTED } from "../src/webhooks.mjs";
+import { assertLinear, LIMIT_MS, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
 
 // R1 go-live v2 optional nit: whitespace before the colon in Bearer/Token/
 // Basic values ("Bearer :abcdefgh") is redacted too, and stays linear.
@@ -19,16 +20,6 @@ test("auth rules: ordinary text is still kept", () => {
   }
 });
 
-function fastest(fn) {
-  let best = Infinity;
-  for (let i = 0; i < 3; i++) {
-    const t = process.hrtime.bigint();
-    fn();
-    best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
-  }
-  return best;
-}
-
 const N = 8000; // just under the 8192-character whole-string guard
 for (const word of ["Bearer", "Token", "Basic"]) {
   const cases = {
@@ -39,9 +30,6 @@ for (const word of ["Bearer", "Token", "Basic"]) {
     [`${word} + mixed whitespace + : + !`]: word + " \t\n\r".repeat(N / 4) + ":!"
   };
   for (const [name, value] of Object.entries(cases)) {
-    test(`auth rules are linear: ${name} under 50 ms`, () => {
-      const ms = fastest(() => redactSecrets({ text: value }));
-      assert.ok(ms < 50, `${name}: ${ms.toFixed(1)} ms`);
-    });
+    test(`auth rules are linear: ${name} under ${LIMIT_MS} ms`, TIMING_TEST_OPTIONS, () => assertLinear(name, "redactSecrets", { text: value }));
   }
 }

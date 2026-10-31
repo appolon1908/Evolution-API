@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { redactSecrets, isSecretKey, REDACTED } from "../src/webhooks.mjs";
+import { assertLinear, LIMIT_MS, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
 
 // R1 go-live v2 blocker: query-parameter names from free message text reach
 // isSecretKey -> keyWords, whose /([A-Z]+)([A-Z][a-z])/g split was quadratic
@@ -8,33 +9,18 @@ import { redactSecrets, isSecretKey, REDACTED } from "../src/webhooks.mjs";
 
 const K64 = 64 * 1024;
 const M1 = 1024 * 1024;
-const LIMIT_MS = 50;
-
-function fastest(fn) {
-  let best = Infinity;
-  for (let i = 0; i < 3; i++) {
-    const t = process.hrtime.bigint();
-    fn();
-    best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
-  }
-  return best;
-}
-
 for (const [label, n] of [["64 KiB", K64], ["1 MiB", M1]]) {
   const caps = "A".repeat(n);
   const cases = {
-    [`all-caps query name (${label})`]: () => redactSecrets({ text: "see ?" + caps + "=x" }),
-    [`all-caps query name after & (${label})`]: () => redactSecrets({ text: "https://h.example.test/?a=1&" + caps + "=x" }),
-    [`all-caps query name ending in Ab (${label})`]: () => redactSecrets({ text: "see ?" + caps + "Ab=x" }),
-    [`all-caps JSON key (${label})`]: () => redactSecrets({ [caps]: "v" }),
-    [`all-caps JSON key ending in Ab (${label})`]: () => redactSecrets({ [caps + "Ab"]: "v" }),
-    [`isSecretKey on all-caps key (${label})`]: () => isSecretKey(caps + "Ab")
+    [`all-caps query name (${label})`]: ["redactSecrets", { text: "see ?" + caps + "=x" }],
+    [`all-caps query name after & (${label})`]: ["redactSecrets", { text: "https://h.example.test/?a=1&" + caps + "=x" }],
+    [`all-caps query name ending in Ab (${label})`]: ["redactSecrets", { text: "see ?" + caps + "Ab=x" }],
+    [`all-caps JSON key (${label})`]: ["redactSecrets", { [caps]: "v" }],
+    [`all-caps JSON key ending in Ab (${label})`]: ["redactSecrets", { [caps + "Ab"]: "v" }],
+    [`isSecretKey on all-caps key (${label})`]: ["isSecretKey", caps + "Ab"]
   };
-  for (const [name, fn] of Object.entries(cases)) {
-    test(`redaction is linear: ${name} under ${LIMIT_MS} ms`, () => {
-      const ms = fastest(fn);
-      assert.ok(ms < LIMIT_MS, `${name}: ${ms.toFixed(1)} ms`);
-    });
+  for (const [name, [fn, arg]] of Object.entries(cases)) {
+    test(`redaction is linear: ${name} under ${LIMIT_MS} ms`, TIMING_TEST_OPTIONS, () => assertLinear(name, fn, arg));
   }
 }
 

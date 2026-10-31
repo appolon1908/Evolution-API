@@ -1,24 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { redactSecrets, REDACTED } from "../src/webhooks.mjs";
+import { assertLinear, LIMIT_MS, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
 
 // R1 go-live review: e4b0b24's JWT lookbehind (which lets "_" start a match
 // while "_" is also in the scanned class) and its Basic/Token whole-string
 // rules were quadratic. All value rules must be linear on third-party text.
 
 const K64 = 64 * 1024;
-const LIMIT_MS = 50;
-
-function fastest(fn) {
-  let best = Infinity;
-  for (let i = 0; i < 3; i++) {
-    const t = process.hrtime.bigint();
-    fn();
-    best = Math.min(best, Number(process.hrtime.bigint() - t) / 1e6);
-  }
-  return best;
-}
-
 const pathological = {
   "_eyJ repeated (64 KiB)": "_eyJ".repeat(K64 / 4),
   "_eyJ repeated + dots (64 KiB)": "_eyJ".repeat(K64 / 8) + ".".repeat(K64 / 2),
@@ -35,10 +24,7 @@ const pathological = {
 };
 
 for (const [name, value] of Object.entries(pathological)) {
-  test(`redaction is linear: ${name} under ${LIMIT_MS} ms`, () => {
-    const ms = fastest(() => redactSecrets({ text: value }));
-    assert.ok(ms < LIMIT_MS, `${name}: ${ms.toFixed(1)} ms`);
-  });
+  test(`redaction is linear: ${name} under ${LIMIT_MS} ms`, TIMING_TEST_OPTIONS, () => assertLinear(name, "redactSecrets", { text: value }));
 }
 
 // Synthetic shapes; not real tokens.
