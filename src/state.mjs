@@ -12,7 +12,8 @@ export function createMessageState({ logger = defaultLogger } = {}) {
   // tenantId: the tenant of the authenticated send request; readback is bound to it.
   // instanceId: the provider instance (Evolution instance / Meta phone_number_id)
   // the message was sent from; later webhooks must come from the same one.
-  function rememberAccepted(result, { tenantId = null, instanceId = null } = {}) {
+  function rememberAccepted(result, { tenantId = null, instanceId: rawInstanceId = null } = {}) {
+    const instanceId = normInstance(rawInstanceId);
     const id = result?.provider_message_id;
     if (!id) return;
     const key = String(id);
@@ -33,7 +34,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       provider_message_id: key,
       tenant_id: existing?.tenant_id ?? tenantId ?? null,
       provider,
-      instance_id: existing?.instance_id ?? (instanceId != null ? String(instanceId) : null),
+      instance_id: existing?.instance_id ?? instanceId,
       state: existing?.state ?? "ACCEPTED",
       updated_at: existing?.updated_at ?? new Date().toISOString()
     });
@@ -50,7 +51,8 @@ export function createMessageState({ logger = defaultLogger } = {}) {
     const id = event?.provider_message_id ?? event?.provider_event_id;
     if (!id) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: false };
     const existing = messages.get(String(id));
-    const mismatch = existing && scopeMismatch(existing, event?.source ?? null, event?.instance_id ?? null, { strictInstance: true });
+    const eventInstance = normInstance(event?.instance_id);
+    const mismatch = existing && scopeMismatch(existing, event?.source ?? null, eventInstance, { strictInstance: true });
     if (mismatch) {
       logger({ event: "webhook_scope_mismatch", reason: mismatch, source: event?.source ?? null });
       return { applied: false, duplicate: false, stale: false, ignored: true, unrecognized: false };
@@ -65,7 +67,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       provider_message_id: String(id),
       tenant_id: null,
       provider: event?.source ?? null,
-      instance_id: event?.instance_id != null ? String(event.instance_id) : null
+      instance_id: eventInstance
     };
     messages.set(String(id), {
       ...current,
@@ -94,12 +96,21 @@ export function createMessageState({ logger = defaultLogger } = {}) {
 // strictInstance: an instance-bound record requires the same instance (a
 // missing instance does not match); otherwise only two known instances that
 // differ are a mismatch.
-function scopeMismatch(record, provider, instanceId, { strictInstance = false } = {}) {
+// Instance ids are compared trimmed, as the providers use them (the Evolution
+// provider trims instance_id before calling sendText); blank means absent.
+function normInstance(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === "" ? null : s;
+}
+
+function scopeMismatch(record, provider, rawInstanceId, { strictInstance = false } = {}) {
+  const instanceId = normInstance(rawInstanceId);
   if (record.provider != null && provider != null && record.provider !== provider) return "provider_mismatch";
   if (record.provider != null && provider == null && strictInstance) return "provider_mismatch";
   if (record.instance_id != null) {
     if (instanceId == null) return strictInstance ? "instance_mismatch" : null;
-    if (String(instanceId) !== record.instance_id) return "instance_mismatch";
+    if (instanceId !== record.instance_id) return "instance_mismatch";
   }
   return null;
 }
