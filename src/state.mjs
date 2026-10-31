@@ -1,6 +1,6 @@
 ﻿// Secret-safe default logger: callers pass only ids, provider/instance names
 // and reason codes, never payloads, headers or configuration values.
-function defaultLogger(entry) {
+export function defaultLogger(entry) {
   console.warn(JSON.stringify({ level: "warn", service: "codestra-evolution-adapter", ...entry }));
 }
 

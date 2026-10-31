@@ -5,7 +5,7 @@ import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
 import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
-import { createMessageState } from "./state.mjs";
+import { createMessageState, defaultLogger } from "./state.mjs";
 
 const MAX_BODY = 1024 * 1024;
 
@@ -20,12 +20,17 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
+// Parse a signature/secret-verified webhook body; null when it is not JSON.
+function parseWebhookJson(raw) {
+  try { return JSON.parse(raw.toString("utf8") || "{}"); } catch { return null; }
+}
+
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...headers });
   res.end(JSON.stringify(body));
 }
 
-export function createApp(customConfig = loadConfig(), { state = createMessageState() } = {}) {
+export function createApp(customConfig = loadConfig(), { state = createMessageState(), logger = defaultLogger } = {}) {
   const providers = {
     evolution: createEvolutionProvider(customConfig),
     meta: createMetaProvider(customConfig)
@@ -115,7 +120,12 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (!verifySharedSecret(customConfig.evolutionWebhookSecret, req.headers["x-codestra-webhook-secret"])) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
-        const event = normalizeEvolutionWebhook(JSON.parse(raw.toString("utf8") || "{}"));
+        const parsed = parseWebhookJson(raw);
+        if (parsed === null) {
+          logger({ event: "webhook_malformed_payload", source: "evolution", bytes: raw.length });
+          return json(res, 400, { error: { code: "malformed_payload" } });
+        }
+        const event = normalizeEvolutionWebhook(parsed);
         const { duplicate, stale, ignored } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
         return json(res, 202, { accepted: true, duplicate, stale, ignored, event, forward });
@@ -137,7 +147,15 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (!verifyMetaSignature(customConfig.metaAppSecret, raw, req.headers["x-hub-signature-256"])) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
-        const events = normalizeMetaWebhookEvents(JSON.parse(raw.toString("utf8") || "{}"));
+        const parsed = parseWebhookJson(raw);
+        if (parsed === null) {
+          // Signature-verified bytes that are not JSON will never parse on
+          // redelivery; Meta retries any non-200 for days, so acknowledge with
+          // 200, apply/forward nothing, and log (size only, never the body).
+          logger({ event: "webhook_malformed_payload", source: "meta", bytes: raw.length });
+          return json(res, 200, { accepted: false, error: { code: "malformed_payload" } });
+        }
+        const events = normalizeMetaWebhookEvents(parsed);
         // Apply and forward every item. A forward failure throws (non-2xx to
         // Meta), so Meta redelivers the whole batch; already-applied items then
         // report duplicate locally and Middleware must dedupe.
@@ -149,7 +167,9 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         }
         // Top-level fields mirror the first item for single-event callers.
         const { duplicate, stale, ignored, forward } = results[0];
-        return json(res, 202, { accepted: true, duplicate, stale, ignored, event: events[0], forward, results });
+        // Meta: "respond to all Event Notifications with 200 OK"; any other
+        // status is retried (WhatsApp: up to 7 days).
+        return json(res, 200, { accepted: true, duplicate, stale, ignored, event: events[0], forward, results });
       }
 
       return json(res, 404, { error: { code: "not_found" } });

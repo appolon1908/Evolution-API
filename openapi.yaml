@@ -39,6 +39,8 @@ paths:
     post:
       responses:
         "202": { description: Provider event normalized }
+        "400": { description: Body is not JSON (malformed_payload) }
+        "401": { description: Missing or wrong x-codestra-webhook-secret }
   /internal/v1/whatsapp/webhooks/meta:
     get:
       responses:
@@ -46,4 +48,5 @@ paths:
         "403": { description: Verification failed }
     post:
       responses:
-        "202": { description: Meta event normalized }
+        "200": { description: "Meta event(s) normalized; also returned (accepted false, malformed_payload) for a verified body that is not JSON, since Meta retries any non-200" }
+        "401": { description: Invalid X-Hub-Signature-256 }
