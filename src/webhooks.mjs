@@ -107,13 +107,18 @@ const MAX_WHOLE_STRING_RULE_LENGTH = 8192;
 const BASIC_AUTH = /^basic(?::\s*|\s+)([A-Za-z0-9+/]{4,}={0,2})$/i;
 // Bounded/disjoint character classes keep both scans linear on hostile input.
 const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]{1,512}@/gi;
-const QUERY_PARAM = /([?&])([^=&#?\s]+)=([^&#\s]*)/g;
+// Query names over 128 characters are not inspected (bounded scan).
+const QUERY_PARAM = /([?&])([^=&#?\s]{1,128})=([^&#\s]*)/g;
+// Keys longer than this are not credential keys (bounds the key split).
+const MAX_SECRET_KEY_LENGTH = 256;
 export const REDACTED = "[REDACTED]";
 
 function keyWords(key) {
   return String(key)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    // Acronym boundary ("XMLApi" -> "XML Api"). A lookahead, not
+    // ([A-Z]+)([A-Z][a-z]), which backtracks quadratically on long capitals.
+    .replace(/([A-Z])(?=[A-Z][a-z])/g, "$1 ")
     .replace(/([A-Za-z])([0-9])/g, "$1 $2")
     .replace(/([0-9])([A-Za-z])/g, "$1 $2")
     .toLowerCase()
@@ -131,6 +136,7 @@ const isKeyWord = (w) => w === "key" || w === "keys";
 const isTokenWord = (w) => w === "token" || w === "tokens";
 
 export function isSecretKey(key) {
+  if (String(key).length > MAX_SECRET_KEY_LENGTH) return false;
   const words = keyWords(key);
   if (words.length === 0) return false;
   // 1. api+key / private+key
