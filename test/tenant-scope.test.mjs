@@ -238,3 +238,47 @@ test("meta webhook: every status in every entry/change of a batch is applied and
     });
   });
 });
+
+// --- (d) Meta acknowledgement semantics -------------------------------------
+
+test("meta webhook: a verified event is acknowledged with 200 (Meta retries anything else)", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base) => {
+    const raw = metaStatusBody("wamid.ack", "delivered");
+    const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).accepted, true);
+  });
+});
+
+test("meta webhook: malformed JSON with a valid signature is acknowledged (200, not accepted), not 500", async () => {
+  await withMockMiddleware(async (eventUrl, received) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: eventUrl }, async (base, _state, logs) => {
+      const raw = '{"object":"whatsapp_business_account","entry":[';
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.accepted, false);
+      assert.equal(body.error.code, "malformed_payload");
+      assert.equal(received.length, 0, "nothing forwarded");
+      assert.ok(logs.some((l) => l.event === "webhook_malformed_payload" && l.source === "meta"));
+      assert.ok(!JSON.stringify(logs).includes(raw), "raw body is not logged");
+    });
+  });
+});
+
+test("meta webhook: malformed JSON with an invalid signature is still 401", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base) => {
+    const raw = "{not json";
+    assert.equal((await postMeta(base, raw, sign("wrong-secret", raw))).status, 401);
+  });
+});
+
+test("evolution webhook: success stays 202; malformed JSON with the right secret is 400, not 500", async () => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+    const ok = await postEvolution(base, { event: "messages.update", instance: "i", data: { key: { id: "evo.ack" }, status: "DELIVERY_ACK" } });
+    assert.equal(ok.status, 202);
+    const bad = await postEvolution(base, "{not json");
+    assert.equal(bad.status, 400);
+    assert.equal((await bad.json()).error.code, "malformed_payload");
+  });
+});

@@ -66,7 +66,7 @@ test("meta webhook: valid raw-body signature is accepted and recorded", async ()
   await withServer({ META_APP_SECRET: APP_SECRET }, async (base) => {
     const raw = metaStatusBody("wamid.valid", "delivered");
     const res = await postMeta(base, raw, sign(APP_SECRET, raw));
-    assert.equal(res.status, 202);
+    assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.accepted, true);
     assert.equal(body.event.provider_message_id, "wamid.valid");

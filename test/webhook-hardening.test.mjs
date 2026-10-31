@@ -55,7 +55,7 @@ test("meta webhook HTTP: missing, wrong-length and duplicated signature headers 
       body
     });
     assert.equal(dup.status, 401);
-    assert.equal((await postMeta(base, body, good)).status, 202);
+    assert.equal((await postMeta(base, body, good)).status, 200);
   });
 });
 
