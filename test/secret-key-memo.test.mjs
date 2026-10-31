@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isSecretKey, redactSecrets, secretKeyCacheSize, SECRET_KEY_CACHE_MAX, REDACTED } from "../src/webhooks.mjs";
+import { isSecretKey, redactSecrets, secretKeyCacheSize, secretKeySeenOnceSize, SECRET_KEY_CACHE_MAX, REDACTED } from "../src/webhooks.mjs";
 import { timeInWorker, TIMING_TEST_OPTIONS } from "./timing-helpers.mjs";
 
 // R1 go-live v3 nit: isSecretKey is memoized per name with a bounded cache.
@@ -36,11 +36,15 @@ test("memoized isSecretKey: warm results equal cold results", async () => {
 
 test("memoized isSecretKey: cache is bounded and eviction keeps results correct", async () => {
   const cold = await coldResults();
+  // Each name twice: the second sighting admits it to the cache.
   for (let i = 0; i < SECRET_KEY_CACHE_MAX * 3; i++) {
-    isSecretKey(`field_${i}`);
-    isSecretKey(`field_${i}_token`);
+    for (let n = 0; n < 2; n++) {
+      assert.equal(isSecretKey(`field_${i}`), false);
+      assert.equal(isSecretKey(`field_${i}_token`), true);
+    }
   }
   assert.equal(secretKeyCacheSize(), SECRET_KEY_CACHE_MAX);
+  assert.ok(secretKeySeenOnceSize() <= SECRET_KEY_CACHE_MAX);
   assert.equal(isSecretKey(`field_${SECRET_KEY_CACHE_MAX * 3 - 1}_token`), true);
   assert.equal(isSecretKey("field_0"), false);
   assert.deepEqual(CORPUS.map((k) => isSecretKey(k)), cold);
@@ -51,8 +55,38 @@ test("memoized isSecretKey: names over 256 characters are not cached", async () 
   const fresh = await import(`../src/webhooks.mjs?long=${Math.random()}`);
   for (let i = 0; i < 100; i++) assert.equal(fresh.isSecretKey(`api_key_${i}_` + "x".repeat(300)), false);
   assert.equal(fresh.secretKeyCacheSize(), 0);
+  assert.equal(fresh.secretKeySeenOnceSize(), 0);
+  assert.equal(fresh.isSecretKey("api_key"), true);
   assert.equal(fresh.isSecretKey("api_key"), true);
   assert.equal(fresh.secretKeyCacheSize(), 1);
+});
+
+test("memoized isSecretKey: names seen once are not cached; the doorkeeper is bounded", async () => {
+  const fresh = await import(`../src/webhooks.mjs?once=${Math.random()}`);
+  for (let i = 0; i < SECRET_KEY_CACHE_MAX * 3; i++) {
+    assert.equal(fresh.isSecretKey(`n${i}`), false);
+    assert.equal(fresh.isSecretKey(`n${i}_access_token`), true);
+    assert.ok(fresh.secretKeySeenOnceSize() <= SECRET_KEY_CACHE_MAX);
+  }
+  assert.equal(fresh.secretKeyCacheSize(), 0);
+  // A name seen again is admitted and keeps its result.
+  assert.equal(fresh.isSecretKey("x_api_key"), true);
+  assert.equal(fresh.isSecretKey("x_api_key"), true);
+  assert.equal(fresh.secretKeyCacheSize(), 1);
+  assert.equal(fresh.isSecretKey("x_api_key"), true);
+});
+
+// All-distinct query names (free text) must not make redaction markedly
+// slower than the uncached path (insert+evict churn on every miss).
+test("redaction: 64K distinct query names are not slowed by cache churn", TIMING_TEST_OPTIONS, async () => {
+  const distinct = { text: "see ?" + Array.from({ length: 64 * 1024 }, (_, i) => `n${i}=v`).join("&") };
+  let cached, uncached;
+  try {
+    [cached, uncached] = await timeInWorker("redactSecrets", distinct, { variants: [null, ["setSecretKeyCacheEnabledForTests", false]], runs: 3 });
+  } catch (err) {
+    assert.fail(`distinct query names: ${err.message}`);
+  }
+  assert.ok(cached < uncached * 1.5, `cached ${cached.toFixed(1)} ms vs uncached ${uncached.toFixed(1)} ms`);
 });
 
 test("memoized isSecretKey: redaction output is unchanged", () => {
