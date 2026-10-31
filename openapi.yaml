@@ -42,6 +42,16 @@ paths:
         "400": { description: Body is not JSON (malformed_payload) }
         "401": { description: Missing or wrong x-codestra-webhook-secret }
   /internal/v1/whatsapp/webhooks/meta:
+    description: >-
+      Known limitation: with FORWARD_EVENTS_ENABLED=true, batch items are
+      forwarded to Middleware one at a time under one shared deadline
+      (WEBHOOK_FORWARD_DEADLINE_MS). If a batch's total forward time exceeds
+      the deadline, the adapter returns 503 and Meta redelivers the whole
+      batch, which restarts at the first item. A batch that is always slower
+      than the deadline never completes and its tail items are never
+      forwarded before Meta stops retrying (7 days). Keep forwarding disabled
+      at volume until the forwarding design (bounded parallel or a batched
+      Middleware call) is decided.
     get:
       responses:
         "200": { description: Meta webhook verification challenge }
