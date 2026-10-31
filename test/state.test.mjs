@@ -23,7 +23,7 @@ test("state: send acknowledgement with no prior event records ACCEPTED", () => {
 test("state: FAILED cannot replace DELIVERED", () => {
   const state = createMessageState();
   state.applyEvent(metaEvent("wamid.df", "delivered"));
-  assert.deepEqual(state.applyEvent(metaEvent("wamid.df", "failed")), { applied: false, duplicate: false, stale: true, ignored: false });
+  assert.deepEqual(state.applyEvent(metaEvent("wamid.df", "failed")), { applied: false, duplicate: false, stale: true, ignored: false, unrecognized: false });
   assert.equal(state.get("wamid.df").state, "DELIVERED");
 });
 

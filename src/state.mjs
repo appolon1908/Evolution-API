@@ -48,16 +48,19 @@ export function createMessageState({ logger = defaultLogger } = {}) {
   // so one tenant's provider events never alter another tenant's message.
   function applyEvent(event) {
     const id = event?.provider_message_id ?? event?.provider_event_id;
-    if (!id) return { applied: false, duplicate: false, stale: false, ignored: false };
+    if (!id) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: false };
     const existing = messages.get(String(id));
     const mismatch = existing && scopeMismatch(existing, event?.source ?? null, event?.instance_id ?? null, { strictInstance: true });
     if (mismatch) {
       logger({ event: "webhook_scope_mismatch", reason: mismatch, source: event?.source ?? null });
-      return { applied: false, duplicate: false, stale: false, ignored: true };
+      return { applied: false, duplicate: false, stale: false, ignored: true, unrecognized: false };
     }
     const next = deriveState(event);
-    if (existing?.state === next) return { applied: false, duplicate: true, stale: false, ignored: false };
-    if (existing && !advances(existing.state, next)) return { applied: false, duplicate: false, stale: true, ignored: false };
+    // Unrecognised statuses (e.g. Evolution PENDING/PLAYED, inbound messages)
+    // carry no delivery progress: never "duplicate", never create a record.
+    if (next === null) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true };
+    if (existing?.state === next) return { applied: false, duplicate: true, stale: false, ignored: false, unrecognized: false };
+    if (existing && !advances(existing.state, next)) return { applied: false, duplicate: false, stale: true, ignored: false, unrecognized: false };
     const current = existing ?? {
       provider_message_id: String(id),
       tenant_id: null,
@@ -69,7 +72,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       state: next,
       updated_at: new Date().toISOString()
     });
-    return { applied: true, duplicate: false, stale: false, ignored: false };
+    return { applied: true, duplicate: false, stale: false, ignored: false, unrecognized: false };
   }
 
   function get(id) {
@@ -114,11 +117,12 @@ function deriveState(event) {
   const payload = event?.provider_payload ?? {};
   const metaStatus = payload?.entry?.[0]?.changes?.[0]?.value?.statuses?.[0]?.status;
   const evolutionStatus = payload?.data?.status ?? payload?.data?.update?.status ?? payload?.status;
-  const raw = String(metaStatus ?? evolutionStatus ?? event?.event_type ?? "").toLowerCase();
+  // Only explicit status fields count; the event_type label is not a status.
+  const raw = String(metaStatus ?? evolutionStatus ?? "").toLowerCase();
 
   if (raw.includes("read")) return "READ";
   if (raw.includes("deliver")) return "DELIVERED";
   if (raw.includes("sent") || raw.includes("server_ack") || raw.includes("device_ack")) return "SENT";
   if (raw.includes("fail") || raw.includes("error")) return "FAILED";
-  return "ACCEPTED";
+  return null;
 }

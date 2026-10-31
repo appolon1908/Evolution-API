@@ -282,3 +282,43 @@ test("evolution webhook: success stays 202; malformed JSON with the right secret
     assert.equal((await bad.json()).error.code, "malformed_payload");
   });
 });
+
+// --- (e) unrecognised statuses ------------------------------------------------
+
+test("state: unrecognised statuses (PENDING, PLAYED) on an ACCEPTED record are not reported as duplicate", () => {
+  const state = createMessageState({ logger: () => {} });
+  state.rememberAccepted({ provider: "evolution", provider_message_id: "u" }, { tenantId: "a", instanceId: "i" });
+  for (const status of ["PENDING", "PLAYED"]) {
+    const r = state.applyEvent({ source: "evolution", provider_message_id: "u", instance_id: "i", provider_payload: { data: { status } } });
+    assert.deepEqual(r, { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true }, status);
+  }
+  assert.equal(state.get("u").state, "ACCEPTED");
+});
+
+test("state: an unrecognised status or inbound message does not create a record", () => {
+  const state = createMessageState({ logger: () => {} });
+  state.applyEvent({ source: "evolution", event_type: "messages.upsert", provider_message_id: "in-1", instance_id: "i", provider_payload: { event: "messages.upsert", data: { key: { id: "in-1" } } } });
+  state.applyEvent({ source: "meta", event_type: "message.received", provider_message_id: "in-2", instance_id: "pn", provider_payload: { entry: [{ changes: [{ value: { messages: [{ id: "in-2" }] } }] }] } });
+  assert.equal(state.get("in-1"), null);
+  assert.equal(state.get("in-2"), null);
+});
+
+test("state: a Meta status object with no status field is unrecognised, not inferred from event_type", () => {
+  const state = createMessageState({ logger: () => {} });
+  const r = state.applyEvent({ source: "meta", event_type: "message.delivery.updated", provider_message_id: "m", instance_id: "pn", provider_payload: { entry: [{ changes: [{ value: { statuses: [{ id: "m" }] } }] }] } });
+  assert.equal(r.unrecognized, true);
+  assert.equal(state.get("m"), null);
+});
+
+test("evolution webhook HTTP: PENDING on a sent message reports unrecognized, not duplicate", async () => {
+  await withMockEvolution(async (mockBase) => {
+    await withServer(sendEnv(mockBase), async (base) => {
+      const id = await sendEvolution(base, "tenant-a", "inst-a");
+      const res = await postEvolution(base, { event: "messages.update", instance: "inst-a", data: { key: { id }, status: "PENDING" } });
+      const body = await res.json();
+      assert.equal(body.duplicate, false);
+      assert.equal(body.unrecognized, true);
+      assert.equal((await readback(base, id, "tenant-a")).body.state, "ACCEPTED");
+    });
+  });
+});

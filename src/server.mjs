@@ -126,9 +126,9 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           return json(res, 400, { error: { code: "malformed_payload" } });
         }
         const event = normalizeEvolutionWebhook(parsed);
-        const { duplicate, stale, ignored } = state.applyEvent(event);
+        const { duplicate, stale, ignored, unrecognized } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, ignored, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, ignored, unrecognized, event, forward });
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
@@ -161,15 +161,15 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         // report duplicate locally and Middleware must dedupe.
         const results = [];
         for (const event of events) {
-          const { duplicate, stale, ignored } = state.applyEvent(event);
+          const { duplicate, stale, ignored, unrecognized } = state.applyEvent(event);
           const forward = await forwardEvent(customConfig, event, correlationId);
-          results.push({ provider_message_id: event.provider_message_id, duplicate, stale, ignored, forward });
+          results.push({ provider_message_id: event.provider_message_id, duplicate, stale, ignored, unrecognized, forward });
         }
         // Top-level fields mirror the first item for single-event callers.
-        const { duplicate, stale, ignored, forward } = results[0];
+        const { duplicate, stale, ignored, unrecognized, forward } = results[0];
         // Meta: "respond to all Event Notifications with 200 OK"; any other
         // status is retried (WhatsApp: up to 7 days).
-        return json(res, 200, { accepted: true, duplicate, stale, ignored, event: events[0], forward, results });
+        return json(res, 200, { accepted: true, duplicate, stale, ignored, unrecognized, event: events[0], forward, results });
       }
 
       return json(res, 404, { error: { code: "not_found" } });
