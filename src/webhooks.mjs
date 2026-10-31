@@ -30,7 +30,12 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 // The instance an Evolution webhook names (the same field normalization uses
 // for instance_id), trimmed; null when absent or not a string/number.
 export function evolutionWebhookInstance(body) {
-  const raw = body?.instance ?? body?.instanceName;
+  return scalarId(body?.instance ?? body?.instanceName);
+}
+
+// A provider instance id as stored and forwarded: a string or number,
+// trimmed (state compares trimmed ids); blank or any other type is null.
+function scalarId(raw) {
   if (typeof raw !== "string" && typeof raw !== "number") return null;
   const s = String(raw).trim();
   return s === "" ? null : s;
@@ -246,7 +251,8 @@ export function normalizeEvolutionWebhook(body) {
     provider_event_id: providerEventId,
     provider_message_id: providerEventId,
     event_type: body?.event ?? "provider.event",
-    instance_id: body?.instance ?? body?.instanceName ?? null,
+    // Same value the per-instance secret was checked against.
+    instance_id: evolutionWebhookInstance(body),
     occurred_at: body?.date_time ?? body?.timestamp ?? null,
     provider_payload: redactSecrets(body)
   };
@@ -309,7 +315,7 @@ function metaEvent(value, item, eventType, payload) {
     provider_event_id: item?.id ?? null,
     provider_message_id: item?.id ?? null,
     event_type: eventType,
-    instance_id: value?.metadata?.phone_number_id ?? null,
+    instance_id: scalarId(value?.metadata?.phone_number_id),
     occurred_at: item?.timestamp ?? null,
     provider_payload: redactSecrets(payload)
   };
