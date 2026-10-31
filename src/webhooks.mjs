@@ -147,8 +147,31 @@ const isSecretWord = isWord(SECRET_WORDS);
 const isKeyWord = (w) => w === "key" || w === "keys";
 const isTokenWord = (w) => w === "token" || w === "tokens";
 
+// isSecretKey is pure, and the same names (payload keys, query names) recur
+// on every webhook, so results are memoized per name. The cache is bounded:
+// only names up to MAX_SECRET_KEY_LENGTH are cached, and the oldest entry is
+// dropped once SECRET_KEY_CACHE_MAX names are held (at most 4096 x 256
+// characters of names).
+export const SECRET_KEY_CACHE_MAX = 4096;
+const secretKeyCache = new Map();
+
 export function isSecretKey(key) {
-  if (String(key).length > MAX_SECRET_KEY_LENGTH) return false;
+  const name = String(key);
+  if (name.length > MAX_SECRET_KEY_LENGTH) return false;
+  const cached = secretKeyCache.get(name);
+  if (cached !== undefined) return cached;
+  const result = classifySecretKey(name);
+  if (secretKeyCache.size >= SECRET_KEY_CACHE_MAX) secretKeyCache.delete(secretKeyCache.keys().next().value);
+  secretKeyCache.set(name, result);
+  return result;
+}
+
+// Test hook: current number of memoized names.
+export function secretKeyCacheSize() {
+  return secretKeyCache.size;
+}
+
+function classifySecretKey(key) {
   const words = keyWords(key);
   if (words.length === 0) return false;
   // 1. api+key / private+key
