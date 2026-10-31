@@ -7,14 +7,19 @@ import { forwardEvent } from "./middleware.mjs";
 import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
 import { createMessageState, defaultLogger } from "./state.mjs";
 
+// Request body caps, enforced while reading and therefore before any
+// signature or secret check (the read is unauthenticated memory exposure).
 const MAX_BODY = 1024 * 1024;
+// Meta: "Webhook payloads can be up to 3 MB" (WhatsApp webhooks guide); the
+// Meta webhook route alone accepts up to 3 MiB.
+const MAX_META_WEBHOOK_BODY = 3 * 1024 * 1024;
 
-async function readBody(req) {
+async function readBody(req, limit = MAX_BODY) {
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > MAX_BODY) throw new ProviderError("payload_too_large", "request body exceeds 1 MiB", { status: 413, retryHint: "never" });
+    if (total > limit) throw new ProviderError("payload_too_large", `request body exceeds ${limit / (1024 * 1024)} MiB`, { status: 413, retryHint: "never" });
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
@@ -148,7 +153,7 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
-        const raw = await readBody(req);
+        const raw = await readBody(req, MAX_META_WEBHOOK_BODY);
         if (!verifyMetaSignature(customConfig.metaAppSecret, raw, req.headers["x-hub-signature-256"])) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
@@ -197,6 +202,9 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       return json(res, 404, { error: { code: "not_found" } });
     } catch (error) {
       const status = error instanceof ProviderError ? error.status : 500;
+      // An oversized body was left partly unread: close the connection so it
+      // is not reused with the rest of that body still in flight.
+      const headers = status === 413 ? { connection: "close" } : {};
       return json(res, status, {
         error: {
           code: error.code || "internal_error",
@@ -204,7 +212,7 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           retry_hint: error.retryHint || "middleware_decides"
         },
         correlation_id: correlationId
-      });
+      }, headers);
     }
   });
 }

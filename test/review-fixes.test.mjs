@@ -339,3 +339,66 @@ test("meta webhook: nothing is logged when every item has an id", async () => {
     assert.equal(logs.filter((l) => l.event === "meta_webhook_items_skipped").length, 0);
   });
 });
+
+// --- Body cap: 3 MiB on the Meta webhook route only --------------------------
+
+const MiB = 1024 * 1024;
+
+function metaPadded(bytes) {
+  const body = JSON.parse(metaBatch([{ id: "wamid.big", status: "delivered", timestamp: "1700000000" }]));
+  body.entry[0].changes[0].value.padding = "x".repeat(bytes);
+  return JSON.stringify(body);
+}
+
+test("body cap: a 2 MiB signed Meta payload is accepted", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base, state) => {
+    const raw = metaPadded(2 * MiB);
+    const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+    assert.equal(res.status, 200);
+    assert.equal(state.get("wamid.big").state, "DELIVERED");
+  });
+});
+
+test("body cap: a Meta payload over 3 MiB gets 413, before signature verification", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base) => {
+    const raw = metaPadded(3 * MiB + 1024);
+    const res = await postMeta(base, raw, "sha256=" + "0".repeat(64));
+    assert.equal(res.status, 413);
+    assert.equal((await res.json()).error.code, "payload_too_large");
+  });
+});
+
+test("body cap: a 2 MiB Evolution webhook body still gets 413", async () => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+    const res = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-codestra-webhook-secret": EVOLUTION_SECRET },
+      body: JSON.stringify({ event: "messages.update", instance: "i", data: { key: { id: "evo.big" }, status: "READ" }, padding: "x".repeat(2 * MiB) })
+    });
+    assert.equal(res.status, 413);
+  });
+});
+
+test("body cap: a 2 MiB internal send body still gets 413", async () => {
+  await withServer({ EXTERNAL_SEND_ENABLED: "true" }, async (base) => {
+    const res = await fetch(base + "/internal/v1/whatsapp/transport/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${SERVICE_TOKEN}`, "x-tenant-id": "tenant-a" },
+      body: JSON.stringify({ padding: "x".repeat(2 * MiB) })
+    });
+    assert.equal(res.status, 413);
+  });
+});
+
+test("body cap: a 413 closes the connection so the unread body cannot poison the next request", async () => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+    const big = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
+      method: "POST", headers: { "x-codestra-webhook-secret": EVOLUTION_SECRET }, body: "x".repeat(2 * MiB)
+    });
+    assert.equal(big.status, 413);
+    assert.equal(big.headers.get("connection"), "close");
+    await big.text();
+    const next = await fetch(base + "/healthz");
+    assert.equal(next.status, 200);
+  });
+});
