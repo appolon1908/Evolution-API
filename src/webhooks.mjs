@@ -53,15 +53,20 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 //     ("x_eyJ.." is redacted, "honeyJar.." is not): "eyJ" + 3-part JWS
 //     (eyJ.., .., ..) or 5-part JWE (the encrypted-key segment may be
 //     empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
-//   - is an opaque authorization value: "Bearer" or "Token" + ":" or
-//     whitespace + one token68-style value of 8+ characters and nothing else
-//     (a whole-string "Token abcdefgh" message is an accepted false
-//     positive), or
+//   - is an opaque authorization value: after trimming, "Bearer" or "Token"
+//     + (":" and optional whitespace, or whitespace) + one token68-style
+//     value of 8+ characters and nothing else (a whole-string
+//     "Token abcdefgh" message is an accepted false positive); strings over
+//     MAX_WHOLE_STRING_RULE_LENGTH are not checked by this rule, or
 //   - is "Basic" + one base64 value that decodes to "user:pass" form.
 // Otherwise URL credentials are redacted in place, keeping the rest of the
 // string: userinfo ("https://u:p@host" -> "https://[REDACTED]@host") and the
 // value of any query parameter whose name is a credential key by the key rule
 // ("?access_token=..", "&apikey=..").
+// Every value pattern must stay linear: the input is third-party message
+// text. The bearer/token pattern is anchored on the trimmed value and its
+// separator alternatives are disjoint from the token class, so a long run of
+// whitespace is scanned once (the old \s*[:\s]\s* form was quadratic).
 const SECRET_WORDS = new Set([
   "apikey", "accesstoken", "authtoken", "refreshtoken", "idtoken",
   "secret", "clientsecret", "password", "passwd", "pwd", "pass", "passphrase",
@@ -73,7 +78,8 @@ const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "d
 const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
 const B64 = "[A-Za-z0-9_-]";
 const JWT_ANYWHERE = new RegExp(`(?<![A-Za-z0-9-])eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
-const OPAQUE_AUTH = /^\s*(?:bearer|token)\s*[:\s]\s*[A-Za-z0-9._~+/=-]{8,}\s*$/i;
+const OPAQUE_AUTH = /^(?:bearer|token)(?::\s*|\s+)[A-Za-z0-9._~+/=-]{8,}$/i;
+const MAX_WHOLE_STRING_RULE_LENGTH = 8192;
 const BASIC_AUTH = /^\s*basic\s*[:\s]\s*([A-Za-z0-9+/]{4,}={0,2})\s*$/i;
 // Bounded/disjoint character classes keep both scans linear on hostile input.
 const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]{1,512}@/gi;
@@ -128,7 +134,11 @@ function isBasicCredential(value) {
 
 export function looksLikeCredentialValue(value) {
   if (typeof value !== "string") return false;
-  return JWT_ANYWHERE.test(value) || OPAQUE_AUTH.test(value) || isBasicCredential(value);
+  return JWT_ANYWHERE.test(value) || isOpaqueAuth(value) || isBasicCredential(value);
+}
+
+function isOpaqueAuth(value) {
+  return value.length <= MAX_WHOLE_STRING_RULE_LENGTH && OPAQUE_AUTH.test(value.trim());
 }
 
 function decodeName(name) {
