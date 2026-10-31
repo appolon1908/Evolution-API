@@ -13,7 +13,19 @@ function positiveInt(raw, fallback) {
   return typeof raw === "string" && /^[1-9][0-9]*$/.test(raw.trim()) ? Number(raw.trim()) : fallback;
 }
 
+// HTTP server bounds. Every open connection may hold up to 3 MiB of an
+// unauthenticated Meta body while it is read, so worst-case body memory is
+// about maxConnections x 3 MiB (128 -> ~384 MiB). Node's defaults are an
+// unlimited connection count, a 60 s headers timeout and a 300 s request
+// timeout; a slow sender could otherwise pin memory for minutes.
+const DEFAULT_HTTP_MAX_CONNECTIONS = 128;
+const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10000;
+const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30000;
+
 export function loadConfig(env = process.env) {
+  const httpRequestTimeoutMs = positiveInt(env.HTTP_REQUEST_TIMEOUT_MS, DEFAULT_HTTP_REQUEST_TIMEOUT_MS);
+  // Node rejects a headers timeout larger than the request timeout.
+  const httpHeadersTimeoutMs = Math.min(positiveInt(env.HTTP_HEADERS_TIMEOUT_MS, DEFAULT_HTTP_HEADERS_TIMEOUT_MS), httpRequestTimeoutMs);
   return Object.freeze({
     port: Number(env.PORT || 8781),
     externalSendEnabled: String(env.EXTERNAL_SEND_ENABLED || "false").toLowerCase() === "true",
@@ -30,7 +42,10 @@ export function loadConfig(env = process.env) {
     metaAccessToken: env.META_ACCESS_TOKEN || "",
     metaAppSecret: env.META_APP_SECRET || "",
     metaVerifyToken: env.META_VERIFY_TOKEN || "",
-    webhookForwardDeadlineMs: positiveInt(env.WEBHOOK_FORWARD_DEADLINE_MS, DEFAULT_WEBHOOK_FORWARD_DEADLINE_MS)
+    webhookForwardDeadlineMs: positiveInt(env.WEBHOOK_FORWARD_DEADLINE_MS, DEFAULT_WEBHOOK_FORWARD_DEADLINE_MS),
+    httpMaxConnections: positiveInt(env.HTTP_MAX_CONNECTIONS, DEFAULT_HTTP_MAX_CONNECTIONS),
+    httpHeadersTimeoutMs,
+    httpRequestTimeoutMs
   });
 }
 

@@ -41,7 +41,14 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
     meta: createMetaProvider(customConfig)
   };
 
-  return http.createServer(async (req, res) => {
+  // Bound total connections and how long a request may take to arrive (see
+  // config.mjs). Node enforces the timeouts on a periodic sweep, so the sweep
+  // interval follows the smaller timeout (at most 1 s).
+  const server = http.createServer({
+    headersTimeout: customConfig.httpHeadersTimeoutMs,
+    requestTimeout: customConfig.httpRequestTimeoutMs,
+    connectionsCheckingInterval: Math.max(10, Math.min(1000, Math.floor(customConfig.httpHeadersTimeoutMs / 2)))
+  }, async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const correlationId = req.headers["x-correlation-id"] || cryptoRandom();
 
@@ -215,6 +222,8 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }, headers);
     }
   });
+  server.maxConnections = customConfig.httpMaxConnections;
+  return server;
 }
 
 function internalAuthError(req, config) {
