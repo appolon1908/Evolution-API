@@ -202,3 +202,39 @@ test("redaction: token-like fields in a Meta payload are stripped too", async ()
     assert.ok(text.includes("wamid.redact"));
   });
 });
+
+// --- (c) batched Meta webhooks -----------------------------------------------
+
+function metaBatchBody() {
+  const status = (id, s) => ({ id, status: s, timestamp: "1700000000", recipient_id: "15550000000" });
+  return JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [
+      { id: "waba-test", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { phone_number_id: "pn-test" }, statuses: [status("wamid.b1", "delivered"), status("wamid.b2", "read")] } }] },
+      { id: "waba-test", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { phone_number_id: "pn-test" }, statuses: [status("wamid.b3", "sent")] } }] }
+    ]
+  });
+}
+
+test("meta webhook: every status in every entry/change of a batch is applied and forwarded once each", async () => {
+  await withMockMiddleware(async (eventUrl, received) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: eventUrl }, async (base, state) => {
+      const raw = metaBatchBody();
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.ok(res.status < 300);
+      const body = await res.json();
+      assert.equal(body.results.length, 3);
+      assert.equal(state.get("wamid.b1").state, "DELIVERED");
+      assert.equal(state.get("wamid.b2").state, "READ");
+      assert.equal(state.get("wamid.b3").state, "SENT");
+      const forwarded = received.map((r) => JSON.parse(r));
+      assert.deepEqual(forwarded.map((e) => e.provider_message_id), ["wamid.b1", "wamid.b2", "wamid.b3"]);
+      // Each forwarded event carries only its own status, in the Meta envelope shape.
+      for (const e of forwarded) {
+        const statuses = e.provider_payload.entry[0].changes[0].value.statuses;
+        assert.equal(statuses.length, 1);
+        assert.equal(statuses[0].id, e.provider_message_id);
+      }
+    });
+  });
+});
