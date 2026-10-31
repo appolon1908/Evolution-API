@@ -224,3 +224,63 @@ test("config: forward deadline defaults to 8000 ms and rejects invalid values", 
   assert.equal(loadConfig({ WEBHOOK_FORWARD_DEADLINE_MS: "2500" }).webhookForwardDeadlineMs, 2500);
   for (const bad of ["", "0", "-5", "abc", "1.5"]) assert.equal(loadConfig({ WEBHOOK_FORWARD_DEADLINE_MS: bad }).webhookForwardDeadlineMs, 8000, bad);
 });
+
+// --- R1 v2 nit 2a: plurals, suffixes, mixed case, more credential words ------
+
+const redactedKeysV3 = [
+  // Plurals and numeric suffixes (v1 substring regex caught these).
+  "apiKeys", "api_keys", "secrets", "passwords", "apikey1", "api_key_2", "credentials", "client_secrets",
+  // Mixed case whole-token.
+  "aPiKeY", "ApIkEy", "SeCrEt", "PassWord",
+  // Additional credential words.
+  "passphrase", "cookie", "Cookie", "set-cookie", "cookies", "signature", "x-hub-signature-256", "signatures",
+  // Session: the whole key or with id/token/key/secret/cookie/data.
+  "session", "sessionId", "session_id", "session-token", "sessionKey", "session_data",
+  // Counter exception leaks closed.
+  "access_token_used", "max_token", "total_token", "token_used_by_client", "access_tokens", "refreshTokens",
+  "tokenSecret", "auth_token_count"
+];
+
+const keptKeysV3 = [
+  // Counters stay readable.
+  "token_count", "tokenCount", "token_limit", "tokens", "total_tokens", "tokens_used", "max_tokens", "prompt_tokens",
+  // Session metadata that is not a credential.
+  "session_count", "session_started_at", "sessions_total",
+  // Middleware and provider fields.
+  "command_id", "correlation_id", "idempotency_key", "provider_message_id", "status", "recipient_id", "wa_id",
+  "phone_number_id", "conversation", "pricing", "remoteJid", "key", "keyId", "message_id", "sha256", "signed_at"
+];
+
+for (const k of redactedKeysV3) {
+  test(`redaction v3: key ${JSON.stringify(k)} is redacted`, () => {
+    assert.equal(redactSecrets({ [k]: FAKE })[k], REDACTED);
+  });
+}
+
+for (const k of keptKeysV3) {
+  test(`redaction v3: key ${JSON.stringify(k)} is kept`, () => {
+    assert.equal(redactSecrets({ [k]: "plain-value" })[k], "plain-value");
+  });
+}
+
+// Synthetic 5-part JWE shape (header {"alg":"dir","enc":"A256GCM"}, empty key segment); not real.
+const FAKE_JWE = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aXYtbm90LXJlYWw.Y2lwaGVydGV4dC1ub3QtcmVhbA.dGFnLW5vdC1yZWFs";
+
+test("redaction v3: JWTs embedded in strings, Bearer: forms, JWE and opaque Bearer values are redacted", () => {
+  const values = {
+    query: `token=${FAKE_JWT}&x=1`,
+    hdr: `Bearer: ${FAKE_JWT}`,
+    text: `see ${FAKE_JWT} here`,
+    jwe: FAKE_JWE,
+    jweEmbedded: `cookie-ish ${FAKE_JWE}`,
+    opaque: "Bearer test-opaque-credential-not-real"
+  };
+  const out = redactSecrets(values);
+  for (const k of Object.keys(values)) assert.equal(out[k], REDACTED, k);
+});
+
+test("redaction v3: eyJ inside a longer word is not a JWT; ordinary text is kept", () => {
+  for (const v of ["honeyJar.abcdef.ghijkl", "keyJustify.aa.bb", "Bearer", "bearer of good news", "wamid.HBgLMTU1NTAwMDAwMDAVAgARGBI5QTNDQTVCM0Q0Q0Q2RTY3RTcA"]) {
+    assert.equal(redactSecrets({ v }).v, v, v);
+  }
+});

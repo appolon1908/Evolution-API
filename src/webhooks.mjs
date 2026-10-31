@@ -23,56 +23,98 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 // Credential redaction for provider payloads that are echoed and forwarded.
 // Upstream Evolution puts the instance `apikey` in every webhook body.
 //
-// Key rule: a key is split into tokens on "_", "-", ".", whitespace and
-// camelCase/acronym boundaries, then lowercased ("x-api-key" -> x|api|key,
-// "accessToken" -> access|token, "APIKEY" -> apikey). It is a credential key if
-//   - any token is one of SECRET_TOKENS (whole-token match, so "author",
-//     "passport", "keyboard", "secretary" and a bare message `key` survive), or
-//   - two adjacent tokens are api+key or private+key;
-//   - EXCEPT when the only credential token is "token" and another token is a
-//     counter word (COUNTER_TOKENS), e.g. token_count, tokenCount. The plural
-//     "tokens" is not a credential token (total_tokens, max_tokens, tokens).
-// Value rule: any string that looks like a JWT (optionally "Bearer "-prefixed)
-// is redacted under any key: three base64url segments separated by "." where
-// the first starts with "eyJ" (a base64url-encoded JSON header).
-const SECRET_TOKENS = new Set([
-  "apikey", "token", "accesstoken", "authtoken", "refreshtoken", "idtoken",
-  "secret", "clientsecret", "password", "passwd", "pwd", "pass",
-  "auth", "authorization", "bearer", "jwt", "credential", "credentials", "privatekey"
+// Key rule. A key is split into words on "_", "-", ".", whitespace,
+// camelCase/acronym and letter/digit boundaries, lowercased; pure-digit words
+// are dropped ("x-hub-signature-256" -> x|hub|signature, "apikey1" -> apikey).
+// A word's base is the word, or the word minus a trailing "s" (plural). The
+// key is a credential key when any of these holds:
+//   1. adjacent words are api+key(s) or private+key(s);
+//   2. a word is "session" and it is the only word, or another word is one of
+//      id, token, key, secret, cookie, data (session, sessionId, session_data);
+//      other session_* metadata (session_count, session_started_at) is kept;
+//   3. a word's base, or the base of all words joined (case-insensitive
+//      whole-key match: "aPiKeY" -> apikey), is in SECRET_WORDS;
+//   4. token family (token/tokens), evaluated only if 1-3 did not match:
+//      - any other word that is not a COUNTER_WORD -> credential
+//        (access_token_used, refreshTokens, token_used_by_client);
+//      - singular "token": kept only as token_<counter...> (token_count,
+//        tokenCount, token_limit); "token" alone, max_token, total_token are
+//        credentials;
+//      - plural "tokens" with only counter words (or none) is a counter and
+//        kept (tokens, total_tokens, tokens_used, max_tokens, prompt_tokens).
+// Words are matched whole, so author, passport, keyboard, secretary, keyId,
+// sha256 and the message `key` object survive.
+//
+// Value rule. A string is replaced entirely when it
+//   - contains a JWT/JWE anywhere, not preceded by a base64url character:
+//     "eyJ" + 3-part JWS (eyJ.., .., ..) or 5-part JWE (the encrypted-key
+//     segment may be empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
+//   - is an opaque bearer credential: "Bearer" + ":" or whitespace + one
+//     token68-style value of 8+ characters and nothing else.
+const SECRET_WORDS = new Set([
+  "apikey", "accesstoken", "authtoken", "refreshtoken", "idtoken",
+  "secret", "clientsecret", "password", "passwd", "pwd", "pass", "passphrase",
+  "auth", "authorization", "bearer", "jwt", "credential", "privatekey",
+  "cookie", "signature"
 ]);
 const SECRET_PAIRS = [["api", "key"], ["private", "key"]];
-const COUNTER_TOKENS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
-const JWT_VALUE = /^eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*$/;
+const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "data"]);
+const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
+const B64 = "[A-Za-z0-9_-]";
+const JWT_ANYWHERE = new RegExp(`(?<!${B64})eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
+const OPAQUE_BEARER = /^\s*bearer\s*[:\s]\s*[A-Za-z0-9._~+/=-]{8,}\s*$/i;
 export const REDACTED = "[REDACTED]";
 
-function keyTokens(key) {
+function keyWords(key) {
   return String(key)
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([A-Za-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([A-Za-z])/g, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+    .filter((w) => w && !/^[0-9]+$/.test(w));
 }
+
+function base(word) {
+  return word.length > 1 && word.endsWith("s") ? [word, word.slice(0, -1)] : [word];
+}
+
+const isWord = (set) => (w) => base(w).some((b) => set.has(b));
+const isSecretWord = isWord(SECRET_WORDS);
+const isKeyWord = (w) => w === "key" || w === "keys";
+const isTokenWord = (w) => w === "token" || w === "tokens";
 
 export function isSecretKey(key) {
-  const tokens = keyTokens(key);
-  const hits = tokens.filter((t) => SECRET_TOKENS.has(t));
-  const pair = tokens.some((t, i) => SECRET_PAIRS.some(([a, b]) => t === a && tokens[i + 1] === b));
-  if (pair) return true;
-  if (hits.length === 0) return false;
-  if (hits.every((t) => t === "token") && tokens.some((t) => COUNTER_TOKENS.has(t))) return false;
-  return true;
+  const words = keyWords(key);
+  if (words.length === 0) return false;
+  // 1. api+key / private+key
+  if (words.some((w, i) => (w === "api" || w === "private") && isKeyWord(words[i + 1] ?? ""))) return true;
+  // 2. session
+  if (words.includes("session") && (words.length === 1 || words.some((w) => SESSION_QUALIFIERS.has(w)))) return true;
+  // 3. credential words, per word and as a whole key
+  if (words.some(isSecretWord) || isSecretWord(words.join(""))) return true;
+  // 4. token family
+  const joined = words.join("");
+  const tokenWords = isTokenWord(joined) ? [joined] : words.filter(isTokenWord);
+  if (tokenWords.length === 0) return false;
+  const others = isTokenWord(joined) ? [] : words.filter((w) => !isTokenWord(w));
+  if (others.some((w) => !COUNTER_WORDS.has(w))) return true;
+  if (tokenWords.includes("token")) {
+    return !(tokenWords.length === 1 && words[0] === "token" && others.length > 0);
+  }
+  return false;
 }
 
-export function looksLikeJwt(value) {
+export function looksLikeCredentialValue(value) {
   if (typeof value !== "string") return false;
-  return JWT_VALUE.test(value.trim().replace(/^bearer\s+/i, ""));
+  return JWT_ANYWHERE.test(value) || OPAQUE_BEARER.test(value);
 }
 
 const MAX_REDACT_DEPTH = 32;
 
 export function redactSecrets(value, depth = 0) {
-  if (looksLikeJwt(value)) return REDACTED;
+  if (looksLikeCredentialValue(value)) return REDACTED;
   if (value === null || typeof value !== "object") return value;
   // Fail closed: a subtree deeper than we inspect is replaced, never echoed.
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
