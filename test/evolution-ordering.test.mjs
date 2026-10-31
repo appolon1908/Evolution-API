@@ -31,7 +31,7 @@ async function postEvolution(base, raw) {
   return { status: res.status, body: await res.json() };
 }
 
-const env = { EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET };
+const env = { EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" };
 
 // Every ordering test runs once per id shape.
 function test(name, fn) {

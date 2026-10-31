@@ -20,6 +20,26 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// The instance an Evolution webhook names (the same field normalization uses
+// for instance_id), trimmed; null when absent or not a string/number.
+export function evolutionWebhookInstance(body) {
+  const raw = body?.instance ?? body?.instanceName;
+  if (typeof raw !== "string" && typeof raw !== "number") return null;
+  const s = String(raw).trim();
+  return s === "" ? null : s;
+}
+
+// Secret an Evolution webhook for `instance` must present: that instance's
+// own secret when mapped; otherwise the legacy shared secret only when it is
+// explicitly enabled; otherwise none (fail closed).
+export function evolutionWebhookSecretFor(config, instance) {
+  if (instance != null && config.evolutionWebhookSecrets?.has(instance)) return config.evolutionWebhookSecrets.get(instance);
+  if (config.evolutionWebhookLegacySharedSecret && typeof config.evolutionWebhookSecret === "string" && config.evolutionWebhookSecret.trim() !== "") {
+    return config.evolutionWebhookSecret;
+  }
+  return null;
+}
+
 // Credential redaction for provider payloads that are echoed and forwarded.
 // Upstream Evolution puts the instance `apikey` in every webhook body.
 //

@@ -40,7 +40,7 @@ test("state: PLAYED is terminal; READ then PLAYED is a duplicate; PLAYED after F
 });
 
 test("http: an upstream-shaped PLAYED messages.update sets READ", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const post = (status) => fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST",
       headers: { "content-type": "application/json", "x-codestra-webhook-secret": EVOLUTION_SECRET },

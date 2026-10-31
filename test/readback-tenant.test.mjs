@@ -26,7 +26,7 @@ function sendEnv(mockBase) {
     EXTERNAL_SEND_ENABLED: "true",
     EVOLUTION_BASE_URL: mockBase,
     EVOLUTION_API_KEY: "test-evolution-key-not-real",
-    EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET
+    EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true"
   };
 }
 
@@ -99,7 +99,7 @@ test("readback: tenant binding survives webhook status updates", async () => {
 });
 
 test("readback: webhook-only records (never sent here) are not readable by any tenant", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const hook = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST",
       headers: { "content-type": "application/json", "x-codestra-webhook-secret": EVOLUTION_SECRET },

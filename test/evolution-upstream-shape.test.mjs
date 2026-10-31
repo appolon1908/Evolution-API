@@ -82,7 +82,7 @@ test("http: send ack then upstream messages.update DELIVERY_ACK -> readback DELI
       EXTERNAL_SEND_ENABLED: "true",
       EVOLUTION_BASE_URL: mockBase,
       EVOLUTION_API_KEY: "test-evolution-key-not-real",
-      EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET
+      EVOLUTION_WEBHOOK_SECRETS: JSON.stringify({ test: EVOLUTION_SECRET })
     };
     await withServer(env, async (base) => {
       const sent = await fetch(base + "/internal/v1/whatsapp/transport/messages", {

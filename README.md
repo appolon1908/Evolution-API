@@ -26,6 +26,21 @@ Public/business callers never use provider endpoints directly.
 
 With `FORWARD_EVENTS_ENABLED=true`, the items of a batched Meta webhook are forwarded to Middleware sequentially under one per-webhook deadline (`WEBHOOK_FORWARD_DEADLINE_MS`, default 8000 ms). When the deadline is exceeded the adapter answers 503 and Meta redelivers the whole batch from its first item, so a batch whose total forward time always exceeds the deadline (for example 1000 items at more than 8 ms each) never completes, and its tail is never forwarded before Meta stops retrying after 7 days. Redelivery itself is safe (state is monotonic; Middleware dedupes). Keep forwarding disabled at volume until the forwarding design (bounded-parallel forwarding, a single batched Middleware call, or a Middleware latency SLO) is decided.
 
+## Evolution webhook authentication
+
+Upstream Evolution sends no body signature. The adapter requires a shared-secret header, `x-codestra-webhook-secret`, which the operator puts in each instance's **per-instance** webhook `headers`. Evolution's global webhook sends no custom headers and therefore cannot be used.
+
+Each instance has its own secret, configured as a JSON object `{"<instanceName>": "<secret>"}`:
+
+- `EVOLUTION_WEBHOOK_SECRETS_FILE`: path to a file with that JSON (preferred: a mounted secret file rendered from the secret store), or
+- `EVOLUTION_WEBHOOK_SECRETS`: the same JSON inline.
+
+Setting both is a configuration error. Instance names are compared trimmed; every secret must be a non-blank string. The header is compared in constant time with the secret of the instance named in the body (`instance`, else `instanceName`) **before** anything is applied, forwarded or logged. An unmapped instance, a missing or wrong header and an unparseable body all get the same `401 invalid_webhook_secret`. Even with a valid secret, an event for another instance's message is ignored by the state scope check.
+
+The legacy single `EVOLUTION_WEBHOOK_SECRET` is honoured only when `EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET=true` (default `false`), and then only for instances that have no secret of their own. Existing deployments that set only `EVOLUTION_WEBHOOK_SECRET` therefore reject every Evolution webhook (fail closed) until they configure the map or opt in; `/readyz` warns `evolution_webhook_legacy_secret_ignored` in that case.
+
+`/readyz` blocks (503) on `evolution_webhook_secrets_ambiguous`, `_unreadable`, `_invalid_json` or `_invalid`, on `evolution_webhook_legacy_secret_missing` (flag on, secret blank), and on `evolution_webhook_secret_missing` when Evolution sending is configured but no secret applies. It reports `webhooks.evolution.{configured, instances, legacy_shared_secret_enabled}`; values are never returned or logged.
+
 ## Connection and memory limits
 
 Each open connection can hold up to 3 MiB of a not-yet-authenticated Meta webhook body (1 MiB on every other route) while it is read, before the signature is checked. The adapter therefore bounds the HTTP server:

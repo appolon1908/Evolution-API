@@ -60,7 +60,7 @@ test("meta webhook HTTP: missing, wrong-length and duplicated signature headers 
 });
 
 test("evolution webhook HTTP: missing header rejects when a secret is configured", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const res = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}"
     });
@@ -94,7 +94,7 @@ test("readyz: not ready when a send-configured provider has an empty webhook sec
     assert.deepEqual(body.reasons, ["evolution_webhook_secret_missing"]);
     assert.equal(body.webhooks.evolution.configured, false);
   });
-  await withServer({ ...evolutionSend, EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ ...evolutionSend, EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const res = await fetch(base + "/readyz");
     assert.equal(res.status, 200);
     assert.equal((await res.json()).status, "ready");

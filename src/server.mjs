@@ -4,7 +4,7 @@ import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
-import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
+import { evolutionWebhookInstance, evolutionWebhookSecretFor, normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
 import { createMessageState, defaultLogger } from "./state.mjs";
 
 // Request body caps, enforced while reading and therefore before any
@@ -84,8 +84,11 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           .map((k) => `${k}_webhook_secret_missing`);
         if (!isConfigured(customConfig.adapterServiceToken)) reasons.push("adapter_service_token_missing");
         if (forwarding.enabled && !forwarding.event_url_configured) reasons.push("middleware_event_url_missing");
+        if (customConfig.evolutionWebhookSecretsError) reasons.push(customConfig.evolutionWebhookSecretsError);
+        if (customConfig.evolutionWebhookLegacySharedSecret && !isConfigured(customConfig.evolutionWebhookSecret)) reasons.push("evolution_webhook_legacy_secret_missing");
         const metaInUse = providers.meta.ready() || webhooks.meta.configured;
         const warnings = metaInUse && !webhooks.meta.verify_token_configured ? ["meta_verify_token_missing"] : [];
+        if (!customConfig.evolutionWebhookLegacySharedSecret && isConfigured(customConfig.evolutionWebhookSecret)) warnings.push("evolution_webhook_legacy_secret_ignored");
         return json(res, reasons.length ? 503 : 200, {
           status: reasons.length ? "not_ready" : "ready",
           safe_mode: !customConfig.externalSendEnabled,
@@ -153,10 +156,16 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/evolution") {
         const raw = await readBody(req);
-        if (!verifySharedSecret(customConfig.evolutionWebhookSecret, req.headers["x-codestra-webhook-secret"])) {
+        // The secret depends on the instance the body names, so the body is
+        // parsed first; nothing is applied, forwarded or logged before the
+        // per-instance secret (or the opted-in legacy secret) verifies.
+        // Unknown instance, missing header and unparseable body all get the
+        // same 401 (no instance-existence oracle).
+        const parsed = parseWebhookJson(raw);
+        const instance = parsed !== null && typeof parsed === "object" ? evolutionWebhookInstance(parsed) : null;
+        if (!verifySharedSecret(evolutionWebhookSecretFor(customConfig, instance), req.headers["x-codestra-webhook-secret"])) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
-        const parsed = parseWebhookJson(raw);
         if (parsed === null) {
           logger({ event: "webhook_malformed_payload", source: "evolution", bytes: raw.length });
           return json(res, 400, { error: { code: "malformed_payload" } });
@@ -276,7 +285,11 @@ function isConfigured(value) {
 
 function webhookReadiness(config) {
   return {
-    evolution: { configured: Boolean(config.evolutionWebhookSecret) },
+    evolution: {
+      configured: (config.evolutionWebhookSecrets?.size ?? 0) > 0 || (config.evolutionWebhookLegacySharedSecret && isConfigured(config.evolutionWebhookSecret)),
+      instances: config.evolutionWebhookSecrets?.size ?? 0,
+      legacy_shared_secret_enabled: config.evolutionWebhookLegacySharedSecret
+    },
     meta: { configured: Boolean(config.metaAppSecret), verify_token_configured: Boolean(config.metaVerifyToken) }
   };
 }
