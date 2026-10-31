@@ -4,8 +4,54 @@ export function defaultLogger(entry) {
   console.warn(JSON.stringify({ level: "warn", service: "codestra-evolution-adapter", ...entry }));
 }
 
-export function createMessageState({ logger = defaultLogger } = {}) {
+// Records with no tenant (webhook-first records: inbound fromMe=false
+// receipts, statuses for messages never sent through this adapter, or a
+// status that arrived before provider.send() returned) are never readable
+// through tenant readback, and inbound receipts are never bound to a tenant,
+// so they are evicted: after TENANTLESS_TTL_MS from creation, and oldest
+// first beyond TENANTLESS_MAX records. Tenant-bound records are never
+// evicted by this. A record leaves the eviction queue when a send binds it
+// to a tenant.
+export const TENANTLESS_TTL_MS = 15 * 60 * 1000;
+export const TENANTLESS_MAX = 10000;
+
+export function createMessageState({
+  logger = defaultLogger,
+  // Monotonic milliseconds: a wall-clock step must not expire or keep
+  // records early/late. Injectable for tests.
+  now = () => performance.now(),
+  tenantlessTtlMs = TENANTLESS_TTL_MS,
+  tenantlessMax = TENANTLESS_MAX
+} = {}) {
   const messages = new Map();
+  // provider_message_id -> creation time (ms), oldest first (insertion order).
+  const tenantless = new Map();
+
+  function evict(key) {
+    tenantless.delete(key);
+    // Defensive: only ever drop a record that is still tenantless.
+    if (messages.get(key)?.tenant_id == null) messages.delete(key);
+  }
+
+  function pruneTenantless() {
+    const cutoff = now() - tenantlessTtlMs;
+    for (const [key, createdAt] of tenantless) {
+      if (tenantless.size <= tenantlessMax && createdAt > cutoff) break;
+      evict(key);
+    }
+  }
+
+  // Stores a record and keeps the tenantless queue in step with it.
+  function store(key, record, { fresh = false } = {}) {
+    messages.set(key, record);
+    if (record.tenant_id != null) {
+      tenantless.delete(key);
+    } else if (fresh || !tenantless.has(key)) {
+      tenantless.delete(key);
+      tenantless.set(key, now());
+      pruneTenantless();
+    }
+  }
 
   // A status webhook can arrive before provider.send() returns; never let the
   // send acknowledgement regress a state that is already further along.
@@ -17,6 +63,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
     const id = result?.provider_message_id;
     if (!id) return;
     const key = String(id);
+    pruneTenantless();
     let existing = messages.get(key);
     const provider = result.provider ?? existing?.provider ?? null;
     if (existing && existing.tenant_id == null && scopeMismatch(existing, provider, instanceId)) {
@@ -29,7 +76,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       logger({ event: "send_binding_conflict", reason: "tenant_already_bound", provider });
       return;
     }
-    messages.set(key, {
+    store(key, {
       ...existing,
       provider_message_id: key,
       tenant_id: existing?.tenant_id ?? tenantId ?? null,
@@ -37,7 +84,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       instance_id: existing?.instance_id ?? instanceId,
       state: existing?.state ?? "ACCEPTED",
       updated_at: existing?.updated_at ?? new Date().toISOString()
-    });
+    }, { fresh: existing === undefined });
   }
 
   // Provider webhooks may be redelivered and arrive out of order. A status
@@ -50,6 +97,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
   function applyEvent(event) {
     const id = event?.provider_message_id ?? event?.provider_event_id;
     if (!id) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: false };
+    pruneTenantless();
     const existing = messages.get(String(id));
     const eventInstance = normInstance(event?.instance_id);
     const mismatch = existing && scopeMismatch(existing, event?.source ?? null, eventInstance, { strictInstance: true });
@@ -58,7 +106,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       return { applied: false, duplicate: false, stale: false, ignored: true, unrecognized: false };
     }
     const next = deriveState(event);
-    // Unrecognised statuses (e.g. Evolution PENDING/PLAYED, inbound messages)
+    // Unrecognised statuses (e.g. Evolution PENDING, inbound messages)
     // carry no delivery progress: never "duplicate", never create a record.
     if (next === null) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true };
     if (existing?.state === next) return { applied: false, duplicate: true, stale: false, ignored: false, unrecognized: false };
@@ -69,16 +117,22 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       provider: event?.source ?? null,
       instance_id: eventInstance
     };
-    messages.set(String(id), {
+    store(String(id), {
       ...current,
       state: next,
       updated_at: new Date().toISOString()
-    });
+    }, { fresh: existing === undefined });
     return { applied: true, duplicate: false, stale: false, ignored: false, unrecognized: false };
   }
 
   function get(id) {
+    pruneTenantless();
     return messages.get(String(id)) ?? null;
+  }
+
+  // Test/ops hook: record counts (no ids or payloads).
+  function size() {
+    return { records: messages.size, tenantless: tenantless.size };
   }
 
   // Tenant-scoped readback: records with no tenant (e.g. webhook-only, never
@@ -89,7 +143,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
     return record;
   }
 
-  return Object.freeze({ rememberAccepted, applyEvent, get, getForTenant });
+  return Object.freeze({ rememberAccepted, applyEvent, get, getForTenant, size });
 }
 
 // Returns a reason code when (provider, instance) does not match the record.
@@ -131,7 +185,9 @@ function deriveState(event) {
   // Only explicit status fields count; the event_type label is not a status.
   const raw = String(metaStatus ?? evolutionStatus ?? "").toLowerCase();
 
-  if (raw.includes("read")) return "READ";
+  // PLAYED (Evolution renderStatus 5: a voice/video message was played) is a
+  // terminal success like READ (owner decision 2026-10-30).
+  if (raw.includes("read") || raw.includes("played")) return "READ";
   if (raw.includes("deliver")) return "DELIVERED";
   if (raw.includes("sent") || raw.includes("server_ack") || raw.includes("device_ack")) return "SENT";
   if (raw.includes("fail") || raw.includes("error")) return "FAILED";

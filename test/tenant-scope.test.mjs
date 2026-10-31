@@ -26,7 +26,7 @@ function sendEnv(mockBase, extra = {}) {
     EXTERNAL_SEND_ENABLED: "true",
     EVOLUTION_BASE_URL: mockBase,
     EVOLUTION_API_KEY: "test-evolution-key-not-real",
-    EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET,
+    EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true",
     META_APP_SECRET: APP_SECRET,
     ...extra
   };
@@ -168,7 +168,7 @@ const FAKE_KEY = "test-upstream-apikey-not-real";
 
 test("redaction: Evolution apikey and token-like fields are stripped from the echo and the Middleware forward", async () => {
   await withMockMiddleware(async (eventUrl, received) => {
-    await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: eventUrl }, async (base) => {
+    await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true", FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: eventUrl }, async (base) => {
       const res = await postEvolution(base, {
         event: "messages.update",
         instance: "inst-a",
@@ -274,7 +274,7 @@ test("meta webhook: malformed JSON with an invalid signature is still 401", asyn
 });
 
 test("evolution webhook: success stays 202; malformed JSON with the right secret is 400, not 500", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const ok = await postEvolution(base, { event: "messages.update", instance: "i", data: { key: { id: "evo.ack" }, status: "DELIVERY_ACK" } });
     assert.equal(ok.status, 202);
     const bad = await postEvolution(base, "{not json");
@@ -285,10 +285,12 @@ test("evolution webhook: success stays 202; malformed JSON with the right secret
 
 // --- (e) unrecognised statuses ------------------------------------------------
 
-test("state: unrecognised statuses (PENDING, PLAYED) on an ACCEPTED record are not reported as duplicate", () => {
+// PLAYED is no longer unrecognised: owner decision 2026-10-30 maps it to READ
+// (see test/played.test.mjs).
+test("state: unrecognised statuses (PENDING, unknown) on an ACCEPTED record are not reported as duplicate", () => {
   const state = createMessageState({ logger: () => {} });
   state.rememberAccepted({ provider: "evolution", provider_message_id: "u" }, { tenantId: "a", instanceId: "i" });
-  for (const status of ["PENDING", "PLAYED"]) {
+  for (const status of ["PENDING", "SOMETHING_NEW"]) {
     const r = state.applyEvent({ source: "evolution", provider_message_id: "u", instance_id: "i", provider_payload: { data: { status } } });
     assert.deepEqual(r, { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true }, status);
   }

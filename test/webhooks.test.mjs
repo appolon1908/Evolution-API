@@ -101,7 +101,7 @@ test("evolution webhook: unconfigured shared secret rejects (fail closed)", asyn
 });
 
 test("evolution webhook: wrong secret rejects, correct secret accepts", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const body = JSON.stringify({ event: "messages.update", instance: "test", data: { key: { id: "evo.1" }, status: "DELIVERY_ACK" } });
     const wrong = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST", headers: { "content-type": "application/json", "x-codestra-webhook-secret": "wrong" }, body

@@ -11,7 +11,8 @@ paths:
   /readyz:
     get:
       responses:
-        "200": { description: Ready in safe mode or configured provider mode }
+        "200": { description: "Ready in safe mode or configured provider mode. May carry warnings (meta_verify_token_missing) that do not block readiness." }
+        "503": { description: "Not ready; reasons lists codes: <provider>_webhook_secret_missing, adapter_service_token_missing (empty or whitespace), middleware_event_url_missing (FORWARD_EVENTS_ENABLED=true without MIDDLEWARE_EVENT_URL). Booleans and codes only, never values." }
   /internal/v1/whatsapp/transport/health:
     get:
       responses:
@@ -37,10 +38,20 @@ paths:
         "423": { description: Provider effects disabled }
   /internal/v1/whatsapp/webhooks/evolution:
     post:
+      description: >-
+        Authenticated by the x-codestra-webhook-secret header, a local
+        convention (not an Evolution signature) set in each instance's
+        per-instance webhook headers. The header must equal the secret of the
+        instance named in the body (instance, else instanceName) from
+        EVOLUTION_WEBHOOK_SECRETS_FILE / EVOLUTION_WEBHOOK_SECRETS. The legacy
+        single EVOLUTION_WEBHOOK_SECRET is accepted only for unmapped instances
+        and only when EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET=true. The message
+        id is data.key.id, else data.keyId (upstream messages.update); never
+        data.messageId (an Evolution database id).
       responses:
         "202": { description: Provider event normalized }
-        "400": { description: Body is not JSON (malformed_payload) }
-        "401": { description: Missing or wrong x-codestra-webhook-secret }
+        "400": { description: Body is not JSON (malformed_payload; only reachable with the legacy shared secret) }
+        "401": { description: "Missing or wrong x-codestra-webhook-secret, unknown instance, or unparseable body (one indistinguishable code: invalid_webhook_secret)" }
   /internal/v1/whatsapp/webhooks/meta:
     description: >-
       Known limitation: with FORWARD_EVENTS_ENABLED=true, batch items are

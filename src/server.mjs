@@ -4,7 +4,7 @@ import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
-import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
+import { evolutionWebhookInstance, evolutionWebhookSecretFor, normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
 import { createMessageState, defaultLogger } from "./state.mjs";
 
 // Request body caps, enforced while reading and therefore before any
@@ -30,6 +30,8 @@ function parseWebhookJson(raw) {
   try { return JSON.parse(raw.toString("utf8") || "{}"); } catch { return null; }
 }
 
+const DROP_LOG_INTERVAL_MS = 10000;
+
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...headers });
   res.end(JSON.stringify(body));
@@ -41,7 +43,14 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
     meta: createMetaProvider(customConfig)
   };
 
-  return http.createServer(async (req, res) => {
+  // Bound total connections and how long a request may take to arrive (see
+  // config.mjs). Node enforces the timeouts on a periodic sweep, so the sweep
+  // interval follows the smaller timeout (at most 1 s).
+  const server = http.createServer({
+    headersTimeout: customConfig.httpHeadersTimeoutMs,
+    requestTimeout: customConfig.httpRequestTimeoutMs,
+    connectionsCheckingInterval: Math.max(10, Math.min(1000, Math.floor(customConfig.httpHeadersTimeoutMs / 2)))
+  }, async (req, res) => {
     const url = new URL(req.url, "http://localhost");
     const correlationId = req.headers["x-correlation-id"] || cryptoRandom();
 
@@ -57,17 +66,39 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
-        // A provider configured to send whose webhook secret is empty would reject
-        // every status webhook (fail closed), so readback could never complete:
-        // report not-ready instead of silently 401-ing provider callbacks.
+        // Not ready when a configuration can never work:
+        // - a provider configured to send whose webhook secret is empty would
+        //   reject every status webhook (fail closed), so readback could never
+        //   complete;
+        // - an empty/whitespace ADAPTER_SERVICE_TOKEN makes every internal
+        //   route answer 503;
+        // - FORWARD_EVENTS_ENABLED=true without MIDDLEWARE_EVENT_URL makes every
+        //   webhook fail.
+        // A missing Meta verify token only matters when (re)subscribing the
+        // webhook, so it is a warning. Booleans and reason codes only.
         const webhooks = webhookReadiness(customConfig);
-        const blocking = Object.keys(providers).filter((k) => providers[k].ready() && !webhooks[k].configured);
-        return json(res, blocking.length ? 503 : 200, {
-          status: blocking.length ? "not_ready" : "ready",
+        const forwarding = {
+          enabled: customConfig.forwardEventsEnabled,
+          event_url_configured: isConfigured(customConfig.middlewareEventUrl)
+        };
+        const reasons = Object.keys(providers)
+          .filter((k) => providers[k].ready() && !webhooks[k].configured)
+          .map((k) => `${k}_webhook_secret_missing`);
+        if (!isConfigured(customConfig.adapterServiceToken)) reasons.push("adapter_service_token_missing");
+        if (forwarding.enabled && !forwarding.event_url_configured) reasons.push("middleware_event_url_missing");
+        if (customConfig.evolutionWebhookSecretsError) reasons.push(customConfig.evolutionWebhookSecretsError);
+        if (customConfig.evolutionWebhookLegacySharedSecret && !isConfigured(customConfig.evolutionWebhookSecret)) reasons.push("evolution_webhook_legacy_secret_missing");
+        const metaInUse = providers.meta.ready() || webhooks.meta.configured;
+        const warnings = metaInUse && !webhooks.meta.verify_token_configured ? ["meta_verify_token_missing"] : [];
+        if (!customConfig.evolutionWebhookLegacySharedSecret && isConfigured(customConfig.evolutionWebhookSecret)) warnings.push("evolution_webhook_legacy_secret_ignored");
+        return json(res, reasons.length ? 503 : 200, {
+          status: reasons.length ? "not_ready" : "ready",
           safe_mode: !customConfig.externalSendEnabled,
           providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }])),
           webhooks,
-          ...(blocking.length ? { reasons: blocking.map((k) => `${k}_webhook_secret_missing`) } : {})
+          forwarding,
+          ...(reasons.length ? { reasons } : {}),
+          ...(warnings.length ? { warnings } : {})
         });
       }
 
@@ -127,10 +158,16 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/evolution") {
         const raw = await readBody(req);
-        if (!verifySharedSecret(customConfig.evolutionWebhookSecret, req.headers["x-codestra-webhook-secret"])) {
+        // The secret depends on the instance the body names, so the body is
+        // parsed first; nothing is applied, forwarded or logged before the
+        // per-instance secret (or the opted-in legacy secret) verifies.
+        // Unknown instance, missing header and unparseable body all get the
+        // same 401 (no instance-existence oracle).
+        const parsed = parseWebhookJson(raw);
+        const instance = parsed !== null && typeof parsed === "object" ? evolutionWebhookInstance(parsed) : null;
+        if (!verifySharedSecret(evolutionWebhookSecretFor(customConfig, instance), req.headers["x-codestra-webhook-secret"])) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
-        const parsed = parseWebhookJson(raw);
         if (parsed === null) {
           logger({ event: "webhook_malformed_payload", source: "evolution", bytes: raw.length });
           return json(res, 400, { error: { code: "malformed_payload" } });
@@ -215,10 +252,26 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }, headers);
     }
   });
+  server.maxConnections = customConfig.httpMaxConnections;
+  // Connections over the cap are dropped by Node with no HTTP response.
+  // Count them; log at most one line per DROP_LOG_INTERVAL_MS (the first drop
+  // immediately) with the number dropped since the last line, and no
+  // addresses, so a flood cannot flood the logs.
+  let dropped = 0;
+  let lastDropLog = -Infinity;
+  server.on("drop", () => {
+    dropped += 1;
+    const now = Date.now();
+    if (now - lastDropLog < DROP_LOG_INTERVAL_MS) return;
+    logger({ event: "http_connection_dropped", reason: "max_connections", max_connections: customConfig.httpMaxConnections, dropped });
+    dropped = 0;
+    lastDropLog = now;
+  });
+  return server;
 }
 
 function internalAuthError(req, config) {
-  if (!config.adapterServiceToken) return { status: 503, code: "service_auth_not_configured" };
+  if (!isConfigured(config.adapterServiceToken)) return { status: 503, code: "service_auth_not_configured" };
   const authorization = String(req.headers.authorization || "");
   if (!authorization.startsWith("Bearer ")) return { status: 401, code: "service_auth_required" };
   const actual = authorization.slice("Bearer ".length);
@@ -241,9 +294,18 @@ function sendTenant(req, body) {
   return tenantId;
 }
 
+// A whitespace-only value can never match a real credential or name a URL.
+function isConfigured(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
 function webhookReadiness(config) {
   return {
-    evolution: { configured: Boolean(config.evolutionWebhookSecret) },
+    evolution: {
+      configured: (config.evolutionWebhookSecrets?.size ?? 0) > 0 || (config.evolutionWebhookLegacySharedSecret && isConfigured(config.evolutionWebhookSecret)),
+      instances: config.evolutionWebhookSecrets?.size ?? 0,
+      legacy_shared_secret_enabled: config.evolutionWebhookLegacySharedSecret
+    },
     meta: { configured: Boolean(config.metaAppSecret), verify_token_configured: Boolean(config.metaVerifyToken) }
   };
 }

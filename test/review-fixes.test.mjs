@@ -105,7 +105,7 @@ test("redaction: dotted non-JWT strings (ids, hosts, versions) are kept", () => 
 
 test("scope: a send with instance_id \" inst \" is matched by a webhook for \"inst\"", async () => {
   await withLoopback(mockEvolution(), async (mockBase) => {
-    await withServer({ EXTERNAL_SEND_ENABLED: "true", EVOLUTION_BASE_URL: mockBase, EVOLUTION_API_KEY: "test-evolution-key-not-real", EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+    await withServer({ EXTERNAL_SEND_ENABLED: "true", EVOLUTION_BASE_URL: mockBase, EVOLUTION_API_KEY: "test-evolution-key-not-real", EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
       const sent = await fetch(base + "/internal/v1/whatsapp/transport/messages", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${SERVICE_TOKEN}`, "x-tenant-id": "tenant-a" },
@@ -369,7 +369,7 @@ test("body cap: a Meta payload over 3 MiB gets 413, before signature verificatio
 });
 
 test("body cap: a 2 MiB Evolution webhook body still gets 413", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const res = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST",
       headers: { "content-type": "application/json", "x-codestra-webhook-secret": EVOLUTION_SECRET },
@@ -391,7 +391,7 @@ test("body cap: a 2 MiB internal send body still gets 413", async () => {
 });
 
 test("body cap: a 413 closes the connection so the unread body cannot poison the next request", async () => {
-  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET }, async (base) => {
+  await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, EVOLUTION_WEBHOOK_LEGACY_SHARED_SECRET: "true" }, async (base) => {
     const big = await fetch(base + "/internal/v1/whatsapp/webhooks/evolution", {
       method: "POST", headers: { "x-codestra-webhook-secret": EVOLUTION_SECRET }, body: "x".repeat(2 * MiB)
     });
