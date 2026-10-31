@@ -77,6 +77,8 @@ Non-blocking `warnings`: `meta_verify_token_missing` (only matters when (re)subs
 
 Evolution also sends `messages.update` for messages the business *received* (`data.fromMe === false`, e.g. our read receipts of inbound messages). These apply to the in-memory state as webhook-only records with no tenant: they are never readable through readback, and they are still forwarded as before. Because no send ever binds them, every tenantless record is evicted **15 minutes after it was created** (a redelivery does not extend this), and beyond **10,000** tenantless records the oldest are evicted first. Records bound to a tenant by a send are never evicted by this; a webhook-first record (a status that arrived before `provider.send()` returned) leaves the eviction queue as soon as the send binds it. If a send binds an id only after its tenantless record was evicted, it starts fresh at `ACCEPTED`. State is process-local and lost on restart anyway.
 
+Accepted edge cases: if more than 10,000 tenantless records arrive between a webhook-first status and the send's acknowledgement, that status is evicted and the send records `ACCEPTED` (a downgrade until the next status webhook). A status redelivered after its tenantless record was evicted recreates the record at that status, so an older redelivered status can regress it.
+
 ## Redaction limits
 
 Credential redaction of echoed and forwarded payloads is bounded so that its cost stays linear on third-party message text. Two cutoffs are deliberate, accepted misses:
