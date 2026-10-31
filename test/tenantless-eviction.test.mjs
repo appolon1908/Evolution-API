@@ -147,3 +147,11 @@ test("tenantless eviction: over HTTP, fromMe=false receipts stay accepted and bo
     await once(server, "close");
   }
 });
+
+test("tenantless eviction: the default clock is monotonic (a wall-clock jump does not expire records)", (t) => {
+  const wall = t.mock.method(Date, "now", () => 1_700_000_000_000);
+  const state = createMessageState({ logger: quiet });
+  state.applyEvent(receipt("inst-a", "mono.1"));
+  wall.mock.mockImplementation(() => 1_700_000_000_000 + 100 * TENANTLESS_TTL_MS); // wall clock steps forward
+  assert.notEqual(state.get("mono.1"), null);
+});

@@ -17,7 +17,9 @@ export const TENANTLESS_MAX = 10000;
 
 export function createMessageState({
   logger = defaultLogger,
-  now = Date.now,
+  // Monotonic milliseconds: a wall-clock step must not expire or keep
+  // records early/late. Injectable for tests.
+  now = () => performance.now(),
   tenantlessTtlMs = TENANTLESS_TTL_MS,
   tenantlessMax = TENANTLESS_MAX
 } = {}) {
