@@ -52,13 +52,16 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 //   - contains a JWT/JWE anywhere, not preceded by a letter, digit or "-"
 //     ("x_eyJ.." is redacted, "honeyJar.." is not): "eyJ" + 3-part JWS
 //     (eyJ.., .., ..) or 5-part JWE (the encrypted-key segment may be
-//     empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
+//     empty), e.g. "token=eyJ..", "Bearer: eyJ..". The scan is linear (see
+//     containsJwt): no regex backtracking over the candidate, or
 //   - is an opaque authorization value: after trimming, "Bearer" or "Token"
 //     + (":" and optional whitespace, or whitespace) + one token68-style
 //     value of 8+ characters and nothing else (a whole-string
 //     "Token abcdefgh" message is an accepted false positive); strings over
 //     MAX_WHOLE_STRING_RULE_LENGTH are not checked by this rule, or
-//   - is "Basic" + one base64 value that decodes to "user:pass" form.
+//   - is, after trimming, "Basic" + (":" and optional whitespace, or
+//     whitespace) + one base64 value that decodes to "user:pass" form (same
+//     length guard).
 // Otherwise URL credentials are redacted in place, keeping the rest of the
 // string: userinfo ("https://u:p@host" -> "https://[REDACTED]@host") and the
 // value of any query parameter whose name is a credential key by the key rule
@@ -66,7 +69,8 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 // Every value pattern must stay linear: the input is third-party message
 // text. The bearer/token pattern is anchored on the trimmed value and its
 // separator alternatives are disjoint from the token class, so a long run of
-// whitespace is scanned once (the old \s*[:\s]\s* form was quadratic).
+// whitespace is scanned once (the old \s*[:\s]\s* form was quadratic); the
+// Basic pattern has the same shape.
 const SECRET_WORDS = new Set([
   "apikey", "accesstoken", "authtoken", "refreshtoken", "idtoken",
   "secret", "clientsecret", "password", "passwd", "pwd", "pass", "passphrase",
@@ -76,11 +80,11 @@ const SECRET_WORDS = new Set([
 const SECRET_PAIRS = [["api", "key"], ["private", "key"]];
 const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "data"]);
 const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
-const B64 = "[A-Za-z0-9_-]";
-const JWT_ANYWHERE = new RegExp(`(?<![A-Za-z0-9-])eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
+// Maximal runs of base64url characters and "."; a JWT never spans a run.
+const JWT_RUN_SEPARATOR = /[^A-Za-z0-9_.-]+/;
 const OPAQUE_AUTH = /^(?:bearer|token)(?::\s*|\s+)[A-Za-z0-9._~+/=-]{8,}$/i;
 const MAX_WHOLE_STRING_RULE_LENGTH = 8192;
-const BASIC_AUTH = /^\s*basic\s*[:\s]\s*([A-Za-z0-9+/]{4,}={0,2})\s*$/i;
+const BASIC_AUTH = /^basic(?::\s*|\s+)([A-Za-z0-9+/]{4,}={0,2})$/i;
 // Bounded/disjoint character classes keep both scans linear on hostile input.
 const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]{1,512}@/gi;
 const QUERY_PARAM = /([?&])([^=&#?\s]+)=([^&#\s]*)/g;
@@ -128,13 +132,42 @@ export function isSecretKey(key) {
 }
 
 function isBasicCredential(value) {
-  const m = BASIC_AUTH.exec(value);
+  if (value.length > MAX_WHOLE_STRING_RULE_LENGTH) return false;
+  const m = BASIC_AUTH.exec(value.trim());
   return m !== null && Buffer.from(m[1], "base64").toString("latin1").includes(":");
 }
 
 export function looksLikeCredentialValue(value) {
   if (typeof value !== "string") return false;
-  return JWT_ANYWHERE.test(value) || isOpaqueAuth(value) || isBasicCredential(value);
+  return containsJwt(value) || isOpaqueAuth(value) || isBasicCredential(value);
+}
+
+// Linear JWT/JWE detection, equivalent to
+//   (?<![A-Za-z0-9-])eyJ B{2,} \. (?: B{2,} \. B* | B* \. B{2,} \. B{2,} \. B* )
+// with B = [A-Za-z0-9_-]. Split into runs of [A-Za-z0-9_.-], then each run
+// into "."-separated segments, each visited once. In a segment the first
+// "eyJ" that is at the segment start (after "." or a run boundary) or after
+// "_" gives the longest first part; a later "eyJ" in the same segment can
+// only be shorter and is followed by the same segments, so it never matches
+// when the first does not.
+function containsJwt(value) {
+  if (!value.includes("eyJ")) return false;
+  for (const run of value.split(JWT_RUN_SEPARATOR)) {
+    if (!run.includes("eyJ")) continue;
+    const segs = run.split(".");
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      let p = seg.indexOf("eyJ");
+      while (p > 0 && seg[p - 1] !== "_") p = seg.indexOf("eyJ", p + 1);
+      if (p < 0 || seg.length - p < 5) continue;
+      const len = (k) => (i + k < segs.length ? segs[i + k].length : -1);
+      // JWS: header . payload(2+) . signature(any)
+      if (len(1) >= 2 && len(2) >= 0) return true;
+      // JWE: header . key(any) . iv(2+) . ciphertext(2+) . tag(any)
+      if (len(1) >= 0 && len(2) >= 2 && len(3) >= 2 && len(4) >= 0) return true;
+    }
+  }
+  return false;
 }
 
 function isOpaqueAuth(value) {
