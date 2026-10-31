@@ -77,6 +77,15 @@ Non-blocking `warnings`: `meta_verify_token_missing` (only matters when (re)subs
 
 Evolution also sends `messages.update` for messages the business *received* (`data.fromMe === false`, e.g. our read receipts of inbound messages). These apply to the in-memory state as webhook-only records with no tenant: they are never readable through readback, and they are still forwarded as before. Because no send ever binds them, every tenantless record is evicted **15 minutes after it was created** (a redelivery does not extend this), and beyond **10,000** tenantless records the oldest are evicted first. Records bound to a tenant by a send are never evicted by this; a webhook-first record (a status that arrived before `provider.send()` returned) leaves the eviction queue as soon as the send binds it. If a send binds an id only after its tenantless record was evicted, it starts fresh at `ACCEPTED`. State is process-local and lost on restart anyway.
 
+## Redaction limits
+
+Credential redaction of echoed and forwarded payloads is bounded so that its cost stays linear on third-party message text. Two cutoffs are deliberate, accepted misses:
+
+- **Keys over 256 characters** are never treated as credential keys: `x_api_key` style keys are redacted up to 256 characters, and a 257-character key ending in `_api_key` is kept as is.
+- **Query parameter names over 128 characters** are not inspected: `?access_token=...` is redacted, but a parameter name of 129 or more characters keeps its value.
+
+Real credential names are well under 40 characters (`access_token`, `x-api-key`, `apikey`, `hub.verify_token`), and provider payload keys are fixed by Evolution and Meta. Whoever can place an oversized key or parameter name next to a secret already controls where that secret goes, so this is not a smuggling channel. Value rules (JWT/JWE, Bearer/Token, Basic) are unaffected by these cutoffs; the whole-string Bearer/Token/Basic rules apply only to strings of up to 8192 characters.
+
 ## Open question: media keys
 
 Redaction replaces Baileys `mediaKey` / `media_key` values in the payload copies that are echoed and forwarded to Middleware. `mediaKey` decrypts the WhatsApp media blob at the `mmg.whatsapp.net` URL. If Middleware needs to download inbound Evolution media itself from the forwarded payload, it cannot with the key redacted; it would instead have to ask Evolution for the decoded media by message key (for example Evolution's get-base64-from-media-message endpoint). This is not confirmed against Middleware. Meta media are unaffected (they are fetched by media id via the Graph API). Owner decision needed before inbound media handling ships.

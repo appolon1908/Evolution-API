@@ -98,6 +98,11 @@ export function evolutionWebhookSecretFor(config, instance) {
 // string: userinfo ("https://u:p@host" -> "https://[REDACTED]@host") and the
 // value of any query parameter whose name is a credential key by the key rule
 // ("?access_token=..", "&apikey=..").
+// Cutoffs (accepted misses, for bounded CPU): keys over
+// MAX_SECRET_KEY_LENGTH (256) characters are never credential keys, and query
+// names over 128 characters are not inspected (QUERY_PARAM), so their values
+// are kept. Real credential names are under 40 characters; anyone able to
+// place an oversized name next to a secret already controls where it goes.
 // Every value pattern must stay linear: the input is third-party message
 // text. The bearer/token pattern is anchored on the trimmed value and its
 // separator alternatives are disjoint from the token class, so a long run of
