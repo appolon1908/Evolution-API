@@ -164,10 +164,19 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         // Apply and forward every item. A forward failure throws (non-2xx to
         // Meta), so Meta redelivers the whole batch; already-applied items then
         // report duplicate locally and Middleware must dedupe.
+        // All forwards share one deadline; exceeding it throws a 503 so Meta
+        // redelivers instead of the batch running for up to N x 10 s.
+        // Items with no message/status id carry nothing Middleware can join on:
+        // they are not applied or forwarded and are counted as ignored.
+        const deadline = Date.now() + customConfig.webhookForwardDeadlineMs;
         const results = [];
         for (const event of events) {
+          if (event.provider_message_id == null) {
+            results.push({ provider_message_id: null, duplicate: false, stale: false, ignored: true, unrecognized: false, forward: { forwarded: false, reason: "no_provider_message_id" } });
+            continue;
+          }
           const { duplicate, stale, ignored, unrecognized } = state.applyEvent(event);
-          const forward = await forwardEvent(customConfig, event, correlationId);
+          const forward = await forwardEvent(customConfig, event, correlationId, { deadline });
           results.push({ provider_message_id: event.provider_message_id, duplicate, stale, ignored, unrecognized, forward });
         }
         // Top-level fields mirror the first item for single-event callers.

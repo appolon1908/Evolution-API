@@ -134,3 +134,93 @@ test("state: instance ids are trimmed on both sides; blank counts as absent", ()
   state.rememberAccepted({ provider: "evolution", provider_message_id: "t2" }, { tenantId: "a", instanceId: "inst" });
   assert.equal(state.applyEvent({ source: "evolution", provider_message_id: "t2", instance_id: "   ", provider_payload: { data: { status: "READ" } } }).ignored, true);
 });
+
+// --- R1 nit 4: skip null-id items; bound total forward time per webhook ------
+
+import { loadConfig } from "../src/config.mjs";
+
+function slowMiddleware(delayMs, received) {
+  return (req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      received.push(Buffer.concat(chunks).toString("utf8"));
+      setTimeout(() => { if (!res.destroyed) { res.writeHead(202, { "content-type": "application/json" }); res.end("{}"); } }, delayMs);
+    });
+  };
+}
+
+function metaBatch(statuses) {
+  return JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [{ id: "waba-test", changes: [{ field: "messages", value: { messaging_product: "whatsapp", metadata: { phone_number_id: "pn-test" }, statuses } }] }]
+  });
+}
+
+test("meta webhook: items with no id are not forwarded and are counted as ignored", async () => {
+  const received = [];
+  await withLoopback(slowMiddleware(0, received), async (mw) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: mw + "/events" }, async (base) => {
+      const raw = metaBatch([{ status: "delivered" }, { id: "wamid.ok", status: "delivered", timestamp: "1700000000" }, "junk"]);
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.results.length, 3);
+      assert.equal(received.length, 1);
+      assert.equal(JSON.parse(received[0]).provider_message_id, "wamid.ok");
+      for (const i of [0, 2]) {
+        assert.equal(body.results[i].ignored, true);
+        assert.deepEqual(body.results[i].forward, { forwarded: false, reason: "no_provider_message_id" });
+      }
+      assert.equal(body.results[1].forward.forwarded, true);
+    });
+  });
+});
+
+test("meta webhook: a generic notification with no message/status id is not forwarded", async () => {
+  const received = [];
+  await withLoopback(slowMiddleware(0, received), async (mw) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: mw + "/events" }, async (base) => {
+      const raw = JSON.stringify({ object: "whatsapp_business_account", entry: [{ id: "waba-test", changes: [{ field: "account_update", value: { event: "VERIFIED_ACCOUNT" } }] }] });
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.equal(res.status, 200);
+      assert.equal(received.length, 0);
+    });
+  });
+});
+
+test("meta webhook: a batch whose forwards exceed the per-request deadline returns 503 so Meta redelivers", async () => {
+  const received = [];
+  await withLoopback(slowMiddleware(250, received), async (mw) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: mw + "/events", WEBHOOK_FORWARD_DEADLINE_MS: "600" }, async (base) => {
+      const statuses = Array.from({ length: 10 }, (_, i) => ({ id: `wamid.slow${i}`, status: "delivered", timestamp: "1700000000" }));
+      const raw = metaBatch(statuses);
+      const t0 = Date.now();
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      const elapsed = Date.now() - t0;
+      assert.equal(res.status, 503);
+      assert.equal((await res.json()).error.code, "forward_deadline_exceeded");
+      assert.ok(elapsed < 1500, `bounded by the deadline (took ${elapsed} ms)`);
+      assert.ok(received.length < 10, "stopped forwarding at the deadline");
+    });
+  });
+});
+
+test("meta webhook: one hung forward is cut at the deadline, not the 10 s per-call timeout", async () => {
+  const received = [];
+  await withLoopback(slowMiddleware(2000, received), async (mw) => {
+    await withServer({ META_APP_SECRET: APP_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: mw + "/events", WEBHOOK_FORWARD_DEADLINE_MS: "300" }, async (base) => {
+      const raw = metaBatch([{ id: "wamid.hung", status: "delivered", timestamp: "1700000000" }]);
+      const t0 = Date.now();
+      const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+      assert.equal(res.status, 503);
+      assert.ok(Date.now() - t0 < 1500);
+    });
+  });
+});
+
+test("config: forward deadline defaults to 8000 ms and rejects invalid values", () => {
+  assert.equal(loadConfig({}).webhookForwardDeadlineMs, 8000);
+  assert.equal(loadConfig({ WEBHOOK_FORWARD_DEADLINE_MS: "2500" }).webhookForwardDeadlineMs, 2500);
+  for (const bad of ["", "0", "-5", "abc", "1.5"]) assert.equal(loadConfig({ WEBHOOK_FORWARD_DEADLINE_MS: bad }).webhookForwardDeadlineMs, 8000, bad);
+});

@@ -50,3 +50,4 @@ paths:
       responses:
         "200": { description: "Meta event(s) normalized; also returned (accepted false, malformed_payload) for a verified body that is not JSON, since Meta retries any non-200" }
         "401": { description: Invalid X-Hub-Signature-256 }
+        "503": { description: "forward_deadline_exceeded: forwarding the batch to Middleware exceeded WEBHOOK_FORWARD_DEADLINE_MS (default 8000); Meta redelivers" }
