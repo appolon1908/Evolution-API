@@ -58,7 +58,7 @@ export function createMessageState({ logger = defaultLogger } = {}) {
       return { applied: false, duplicate: false, stale: false, ignored: true, unrecognized: false };
     }
     const next = deriveState(event);
-    // Unrecognised statuses (e.g. Evolution PENDING/PLAYED, inbound messages)
+    // Unrecognised statuses (e.g. Evolution PENDING, inbound messages)
     // carry no delivery progress: never "duplicate", never create a record.
     if (next === null) return { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true };
     if (existing?.state === next) return { applied: false, duplicate: true, stale: false, ignored: false, unrecognized: false };
@@ -131,7 +131,9 @@ function deriveState(event) {
   // Only explicit status fields count; the event_type label is not a status.
   const raw = String(metaStatus ?? evolutionStatus ?? "").toLowerCase();
 
-  if (raw.includes("read")) return "READ";
+  // PLAYED (Evolution renderStatus 5: a voice/video message was played) is a
+  // terminal success like READ (owner decision 2026-10-30).
+  if (raw.includes("read") || raw.includes("played")) return "READ";
   if (raw.includes("deliver")) return "DELIVERED";
   if (raw.includes("sent") || raw.includes("server_ack") || raw.includes("device_ack")) return "SENT";
   if (raw.includes("fail") || raw.includes("error")) return "FAILED";

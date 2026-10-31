@@ -285,10 +285,12 @@ test("evolution webhook: success stays 202; malformed JSON with the right secret
 
 // --- (e) unrecognised statuses ------------------------------------------------
 
-test("state: unrecognised statuses (PENDING, PLAYED) on an ACCEPTED record are not reported as duplicate", () => {
+// PLAYED is no longer unrecognised: owner decision 2026-10-30 maps it to READ
+// (see test/played.test.mjs).
+test("state: unrecognised statuses (PENDING, unknown) on an ACCEPTED record are not reported as duplicate", () => {
   const state = createMessageState({ logger: () => {} });
   state.rememberAccepted({ provider: "evolution", provider_message_id: "u" }, { tenantId: "a", instanceId: "i" });
-  for (const status of ["PENDING", "PLAYED"]) {
+  for (const status of ["PENDING", "SOMETHING_NEW"]) {
     const r = state.applyEvent({ source: "evolution", provider_message_id: "u", instance_id: "i", provider_payload: { data: { status } } });
     assert.deepEqual(r, { applied: false, duplicate: false, stale: false, ignored: false, unrecognized: true }, status);
   }
