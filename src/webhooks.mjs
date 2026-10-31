@@ -29,7 +29,7 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 // A word's base is the word, or the word minus a trailing "s" (plural). The
 // key is a credential key when any of these holds:
 //   1. adjacent words are api+key(s) or private+key(s);
-//   2. a word is "session" and it is the only word, or another word is one of
+//   2. a word is "session"/"sessions" and it is the only word, or another word is one of
 //      id, token, key, secret, cookie, data (session, sessionId, session_data);
 //      other session_* metadata (session_count, session_started_at) is kept;
 //   3. a word's base, or the base of all words joined (case-insensitive
@@ -45,24 +45,39 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 // Words are matched whole, so author, passport, keyboard, secretary, keyId,
 // sha256 and the message `key` object survive.
 //
+// "mediakey" (Baileys mediaKey / media_key, a media decryption key) is a
+// whole-key match only, so mediaKeyTimestamp is kept.
+//
 // Value rule. A string is replaced entirely when it
-//   - contains a JWT/JWE anywhere, not preceded by a base64url character:
-//     "eyJ" + 3-part JWS (eyJ.., .., ..) or 5-part JWE (the encrypted-key
-//     segment may be empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
-//   - is an opaque bearer credential: "Bearer" + ":" or whitespace + one
-//     token68-style value of 8+ characters and nothing else.
+//   - contains a JWT/JWE anywhere, not preceded by a letter, digit or "-"
+//     ("x_eyJ.." is redacted, "honeyJar.." is not): "eyJ" + 3-part JWS
+//     (eyJ.., .., ..) or 5-part JWE (the encrypted-key segment may be
+//     empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
+//   - is an opaque authorization value: "Bearer" or "Token" + ":" or
+//     whitespace + one token68-style value of 8+ characters and nothing else
+//     (a whole-string "Token abcdefgh" message is an accepted false
+//     positive), or
+//   - is "Basic" + one base64 value that decodes to "user:pass" form.
+// Otherwise URL credentials are redacted in place, keeping the rest of the
+// string: userinfo ("https://u:p@host" -> "https://[REDACTED]@host") and the
+// value of any query parameter whose name is a credential key by the key rule
+// ("?access_token=..", "&apikey=..").
 const SECRET_WORDS = new Set([
   "apikey", "accesstoken", "authtoken", "refreshtoken", "idtoken",
   "secret", "clientsecret", "password", "passwd", "pwd", "pass", "passphrase",
   "auth", "authorization", "bearer", "jwt", "credential", "privatekey",
-  "cookie", "signature"
+  "cookie", "signature", "mediakey"
 ]);
 const SECRET_PAIRS = [["api", "key"], ["private", "key"]];
 const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "data"]);
 const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
 const B64 = "[A-Za-z0-9_-]";
-const JWT_ANYWHERE = new RegExp(`(?<!${B64})eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
-const OPAQUE_BEARER = /^\s*bearer\s*[:\s]\s*[A-Za-z0-9._~+/=-]{8,}\s*$/i;
+const JWT_ANYWHERE = new RegExp(`(?<![A-Za-z0-9-])eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
+const OPAQUE_AUTH = /^\s*(?:bearer|token)\s*[:\s]\s*[A-Za-z0-9._~+/=-]{8,}\s*$/i;
+const BASIC_AUTH = /^\s*basic\s*[:\s]\s*([A-Za-z0-9+/]{4,}={0,2})\s*$/i;
+// Bounded/disjoint character classes keep both scans linear on hostile input.
+const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]{1,512}@/gi;
+const QUERY_PARAM = /([?&])([^=&#?\s]+)=([^&#\s]*)/g;
 export const REDACTED = "[REDACTED]";
 
 function keyWords(key) {
@@ -91,7 +106,7 @@ export function isSecretKey(key) {
   // 1. api+key / private+key
   if (words.some((w, i) => (w === "api" || w === "private") && isKeyWord(words[i + 1] ?? ""))) return true;
   // 2. session
-  if (words.includes("session") && (words.length === 1 || words.some((w) => SESSION_QUALIFIERS.has(w)))) return true;
+  if (words.some((w) => w === "session" || w === "sessions") && (words.length === 1 || words.some((w) => SESSION_QUALIFIERS.has(w)))) return true;
   // 3. credential words, per word and as a whole key
   if (words.some(isSecretWord) || isSecretWord(words.join(""))) return true;
   // 4. token family
@@ -106,15 +121,33 @@ export function isSecretKey(key) {
   return false;
 }
 
+function isBasicCredential(value) {
+  const m = BASIC_AUTH.exec(value);
+  return m !== null && Buffer.from(m[1], "base64").toString("latin1").includes(":");
+}
+
 export function looksLikeCredentialValue(value) {
   if (typeof value !== "string") return false;
-  return JWT_ANYWHERE.test(value) || OPAQUE_BEARER.test(value);
+  return JWT_ANYWHERE.test(value) || OPAQUE_AUTH.test(value) || isBasicCredential(value);
+}
+
+function decodeName(name) {
+  try { return decodeURIComponent(name); } catch { return name; }
+}
+
+// In-place redaction of credentials carried inside URLs (see Value rule).
+function redactUrlCredentials(value) {
+  if (!value.includes("://") && !value.includes("?")) return value;
+  return value
+    .replace(URL_USERINFO, `$1${REDACTED}@`)
+    .replace(QUERY_PARAM, (match, sep, name, v) => (v !== "" && isSecretKey(decodeName(name)) ? `${sep}${name}=${REDACTED}` : match));
 }
 
 const MAX_REDACT_DEPTH = 32;
 
 export function redactSecrets(value, depth = 0) {
   if (looksLikeCredentialValue(value)) return REDACTED;
+  if (typeof value === "string") return redactUrlCredentials(value);
   if (value === null || typeof value !== "object") return value;
   // Fail closed: a subtree deeper than we inspect is replaced, never echoed.
   if (depth > MAX_REDACT_DEPTH) return REDACTED;
@@ -172,7 +205,9 @@ export function normalizeMetaWebhookEvents(body) {
 // (Meta field names only; anything else is "other"), and the number of
 // value-level errors. Counts and field names only, never values.
 export function summarizeMetaSkips(body) {
-  const skippedFields = {};
+  // Counted on a prototype-less object so a field named "constructor" or
+  // "__proto__" is just a key; returned as a plain object of own properties.
+  const counts = Object.create(null);
   let valueErrors = 0;
   for (const entry of Array.isArray(body?.entry) ? body.entry : []) {
     for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
@@ -181,11 +216,11 @@ export function summarizeMetaSkips(body) {
       const items = (Array.isArray(value?.messages) ? value.messages.length : 0) + (Array.isArray(value?.statuses) ? value.statuses.length : 0);
       if (items === 0) {
         const field = typeof change?.field === "string" && /^[a-z0-9_]{1,64}$/.test(change.field) ? change.field : "other";
-        skippedFields[field] = (skippedFields[field] ?? 0) + 1;
+        counts[field] = (counts[field] ?? 0) + 1;
       }
     }
   }
-  return { skippedFields, valueErrors };
+  return { skippedFields: Object.fromEntries(Object.entries(counts)), valueErrors };
 }
 
 function metaEvent(value, item, eventType, payload) {
