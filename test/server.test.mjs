@@ -54,7 +54,7 @@ test("internal transport requires service authentication", async () => {
 
 test("authorized readback returns not found for unknown provider message", async () => {
   await withServer(async (base) => {
-    const res = await fetch(base + "/internal/v1/whatsapp/transport/messages/not-present", { headers: { authorization: "Bearer test-service-token" } });
+    const res = await fetch(base + "/internal/v1/whatsapp/transport/messages/not-present", { headers: { authorization: "Bearer test-service-token", "x-tenant-id": "tenant-a" } });
     assert.equal(res.status, 404);
     const body = await res.json();
     assert.equal(body.error.code, "provider_message_not_found");

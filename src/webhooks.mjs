@@ -1,16 +1,19 @@
 ﻿import crypto from "node:crypto";
 
+// Fail closed: an unconfigured (missing or empty) secret never authenticates.
 export function verifySharedSecret(expected, actual) {
-  if (!expected) return true;
-  if (!actual) return false;
+  if (typeof expected !== "string" || expected === "") return false;
+  if (typeof actual !== "string" || actual === "") return false;
   const a = Buffer.from(expected);
   const b = Buffer.from(actual);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Meta: X-Hub-Signature-256 = "sha256=" + hex(HMAC-SHA256(app_secret, raw request body)).
+// Fail closed: an unconfigured (missing or empty) app secret never authenticates.
 export function verifyMetaSignature(appSecret, rawBody, signature) {
-  if (!appSecret) return true;
-  if (!signature?.startsWith("sha256=")) return false;
+  if (typeof appSecret !== "string" || appSecret === "") return false;
+  if (typeof signature !== "string" || !signature.startsWith("sha256=")) return false;
   const expected = "sha256=" + crypto.createHmac("sha256", appSecret).update(rawBody).digest("hex");
   const a = Buffer.from(expected);
   const b = Buffer.from(signature);
