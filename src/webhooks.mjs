@@ -49,8 +49,14 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 //   - contains a JWT/JWE anywhere, not preceded by a base64url character:
 //     "eyJ" + 3-part JWS (eyJ.., .., ..) or 5-part JWE (the encrypted-key
 //     segment may be empty), e.g. "token=eyJ..", "Bearer: eyJ..", or
-//   - is an opaque bearer credential: "Bearer" + ":" or whitespace + one
-//     token68-style value of 8+ characters and nothing else.
+//   - is an opaque bearer credential: after trimming, "Bearer" + (":" and
+//     optional whitespace, or whitespace) + one token68-style value of 8+
+//     characters and nothing else; strings over MAX_WHOLE_STRING_RULE_LENGTH
+//     are not checked by this rule.
+// Every value pattern must stay linear: the input is third-party message
+// text. The bearer pattern is anchored on the trimmed value and its
+// separator alternatives are disjoint from the token class, so a long run of
+// whitespace is scanned once (the old \s*[:\s]\s* form was quadratic).
 const SECRET_WORDS = new Set([
   "apikey", "accesstoken", "authtoken", "refreshtoken", "idtoken",
   "secret", "clientsecret", "password", "passwd", "pwd", "pass", "passphrase",
@@ -62,7 +68,8 @@ const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "d
 const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
 const B64 = "[A-Za-z0-9_-]";
 const JWT_ANYWHERE = new RegExp(`(?<!${B64})eyJ${B64}{2,}\\.(?:${B64}{2,}\\.${B64}*|${B64}*\\.${B64}{2,}\\.${B64}{2,}\\.${B64}*)`);
-const OPAQUE_BEARER = /^\s*bearer\s*[:\s]\s*[A-Za-z0-9._~+/=-]{8,}\s*$/i;
+const OPAQUE_BEARER = /^bearer(?::\s*|\s+)[A-Za-z0-9._~+/=-]{8,}$/i;
+const MAX_WHOLE_STRING_RULE_LENGTH = 8192;
 export const REDACTED = "[REDACTED]";
 
 function keyWords(key) {
@@ -108,7 +115,11 @@ export function isSecretKey(key) {
 
 export function looksLikeCredentialValue(value) {
   if (typeof value !== "string") return false;
-  return JWT_ANYWHERE.test(value) || OPAQUE_BEARER.test(value);
+  return JWT_ANYWHERE.test(value) || isOpaqueBearer(value);
+}
+
+function isOpaqueBearer(value) {
+  return value.length <= MAX_WHOLE_STRING_RULE_LENGTH && OPAQUE_BEARER.test(value.trim());
 }
 
 const MAX_REDACT_DEPTH = 32;
