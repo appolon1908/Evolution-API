@@ -73,9 +73,9 @@ These are a backstop, not the primary control. At the ingress (reverse proxy / l
 
 Non-blocking `warnings`: `meta_verify_token_missing` (only matters when (re)subscribing the Meta webhook) and `evolution_webhook_legacy_secret_ignored`.
 
-## Known limitation: tenantless records from inbound receipts
+## Tenantless records from inbound receipts (bounded)
 
-Evolution also sends `messages.update` for messages the business *received* (`data.fromMe === false`, e.g. our read receipts of inbound messages). These apply to the in-memory state as webhook-only records with no tenant: they are never readable through readback, but the in-memory map grows with inbound traffic and is not evicted (state is process-local and lost on restart anyway). Follow-up, not done here: skip state for `fromMe === false` while still forwarding.
+Evolution also sends `messages.update` for messages the business *received* (`data.fromMe === false`, e.g. our read receipts of inbound messages). These apply to the in-memory state as webhook-only records with no tenant: they are never readable through readback, and they are still forwarded as before. Because no send ever binds them, every tenantless record is evicted **15 minutes after it was created** (a redelivery does not extend this), and beyond **10,000** tenantless records the oldest are evicted first. Records bound to a tenant by a send are never evicted by this; a webhook-first record (a status that arrived before `provider.send()` returned) leaves the eviction queue as soon as the send binds it. If a send binds an id only after its tenantless record was evicted, it starts fresh at `ACCEPTED`. State is process-local and lost on restart anyway.
 
 ## Open question: media keys
 
