@@ -64,17 +64,36 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }
 
       if (req.method === "GET" && url.pathname === "/readyz") {
-        // A provider configured to send whose webhook secret is empty would reject
-        // every status webhook (fail closed), so readback could never complete:
-        // report not-ready instead of silently 401-ing provider callbacks.
+        // Not ready when a configuration can never work:
+        // - a provider configured to send whose webhook secret is empty would
+        //   reject every status webhook (fail closed), so readback could never
+        //   complete;
+        // - an empty/whitespace ADAPTER_SERVICE_TOKEN makes every internal
+        //   route answer 503;
+        // - FORWARD_EVENTS_ENABLED=true without MIDDLEWARE_EVENT_URL makes every
+        //   webhook fail.
+        // A missing Meta verify token only matters when (re)subscribing the
+        // webhook, so it is a warning. Booleans and reason codes only.
         const webhooks = webhookReadiness(customConfig);
-        const blocking = Object.keys(providers).filter((k) => providers[k].ready() && !webhooks[k].configured);
-        return json(res, blocking.length ? 503 : 200, {
-          status: blocking.length ? "not_ready" : "ready",
+        const forwarding = {
+          enabled: customConfig.forwardEventsEnabled,
+          event_url_configured: isConfigured(customConfig.middlewareEventUrl)
+        };
+        const reasons = Object.keys(providers)
+          .filter((k) => providers[k].ready() && !webhooks[k].configured)
+          .map((k) => `${k}_webhook_secret_missing`);
+        if (!isConfigured(customConfig.adapterServiceToken)) reasons.push("adapter_service_token_missing");
+        if (forwarding.enabled && !forwarding.event_url_configured) reasons.push("middleware_event_url_missing");
+        const metaInUse = providers.meta.ready() || webhooks.meta.configured;
+        const warnings = metaInUse && !webhooks.meta.verify_token_configured ? ["meta_verify_token_missing"] : [];
+        return json(res, reasons.length ? 503 : 200, {
+          status: reasons.length ? "not_ready" : "ready",
           safe_mode: !customConfig.externalSendEnabled,
           providers: Object.fromEntries(Object.entries(providers).map(([k, p]) => [k, { configured: p.ready() }])),
           webhooks,
-          ...(blocking.length ? { reasons: blocking.map((k) => `${k}_webhook_secret_missing`) } : {})
+          forwarding,
+          ...(reasons.length ? { reasons } : {}),
+          ...(warnings.length ? { warnings } : {})
         });
       }
 
@@ -227,7 +246,7 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
 }
 
 function internalAuthError(req, config) {
-  if (!config.adapterServiceToken) return { status: 503, code: "service_auth_not_configured" };
+  if (!isConfigured(config.adapterServiceToken)) return { status: 503, code: "service_auth_not_configured" };
   const authorization = String(req.headers.authorization || "");
   if (!authorization.startsWith("Bearer ")) return { status: 401, code: "service_auth_required" };
   const actual = authorization.slice("Bearer ".length);
@@ -248,6 +267,11 @@ function sendTenant(req, body) {
     throw new ProviderError("tenant_mismatch", "X-Tenant-ID and body tenant_id disagree", { status: 400, retryHint: "never" });
   }
   return tenantId;
+}
+
+// A whitespace-only value can never match a real credential or name a URL.
+function isConfigured(value) {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function webhookReadiness(config) {

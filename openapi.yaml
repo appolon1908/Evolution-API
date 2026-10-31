@@ -11,7 +11,8 @@ paths:
   /readyz:
     get:
       responses:
-        "200": { description: Ready in safe mode or configured provider mode }
+        "200": { description: "Ready in safe mode or configured provider mode. May carry warnings (meta_verify_token_missing) that do not block readiness." }
+        "503": { description: "Not ready; reasons lists codes: <provider>_webhook_secret_missing, adapter_service_token_missing (empty or whitespace), middleware_event_url_missing (FORWARD_EVENTS_ENABLED=true without MIDDLEWARE_EVENT_URL). Booleans and codes only, never values." }
   /internal/v1/whatsapp/transport/health:
     get:
       responses:
