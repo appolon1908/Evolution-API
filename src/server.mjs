@@ -88,7 +88,8 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         const provider = providers[providerName];
         if (!provider) throw new ProviderError("unknown_provider", `unknown provider: ${providerName}`, { status: 400, retryHint: "never" });
         const result = await provider.send(body);
-        state.rememberAccepted(result, { tenantId });
+        const instanceId = providerName === "meta" ? customConfig.metaPhoneNumberId : body.instance_id;
+        state.rememberAccepted(result, { tenantId, instanceId });
         return json(res, 202, {
           command_id: body.command_id,
           correlation_id: body.correlation_id,
@@ -115,9 +116,9 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
         const event = normalizeEvolutionWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        const { duplicate, stale } = state.applyEvent(event);
+        const { duplicate, stale, ignored } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, ignored, event, forward });
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
@@ -137,9 +138,9 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
         const event = normalizeMetaWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        const { duplicate, stale } = state.applyEvent(event);
+        const { duplicate, stale, ignored } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, ignored, event, forward });
       }
 
       return json(res, 404, { error: { code: "not_found" } });
