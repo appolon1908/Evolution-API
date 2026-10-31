@@ -159,16 +159,23 @@ const isTokenWord = (w) => w === "token" || w === "tokens";
 // characters of names).
 export const SECRET_KEY_CACHE_MAX = 4096;
 const secretKeyCache = new Map();
+let secretKeyCacheEnabled = true;
 
 export function isSecretKey(key) {
   const name = String(key);
   if (name.length > MAX_SECRET_KEY_LENGTH) return false;
+  if (!secretKeyCacheEnabled) return classifySecretKey(name);
   const cached = secretKeyCache.get(name);
   if (cached !== undefined) return cached;
   const result = classifySecretKey(name);
   if (secretKeyCache.size >= SECRET_KEY_CACHE_MAX) secretKeyCache.delete(secretKeyCache.keys().next().value);
   secretKeyCache.set(name, result);
   return result;
+}
+
+// Test hook: bypass the cache (timing tests measure the uncached path).
+export function setSecretKeyCacheEnabledForTests(enabled) {
+  secretKeyCacheEnabled = Boolean(enabled);
 }
 
 // Test hook: current number of memoized names.
