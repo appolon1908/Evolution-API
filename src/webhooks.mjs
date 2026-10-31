@@ -20,6 +20,22 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// Field names that carry credentials. Upstream Evolution puts the instance
+// `apikey` in every webhook body; never echo or forward such values. Matches
+// whole-word credential markers only, so message `key` objects survive.
+const SECRET_FIELD = /(api[-_]?key|token|secret|passw(or)?d|authorization|jwt|credential|private[-_]?key)/i;
+export const REDACTED = "[REDACTED]";
+
+export function redactSecrets(value, depth = 0) {
+  if (depth > 32 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => redactSecrets(item, depth + 1));
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = SECRET_FIELD.test(k) && v != null && v !== "" ? REDACTED : redactSecrets(v, depth + 1);
+  }
+  return out;
+}
+
 export function normalizeEvolutionWebhook(body) {
   const providerEventId = body?.data?.key?.id ?? body?.data?.id ?? body?.id ?? null;
   return {
@@ -29,7 +45,7 @@ export function normalizeEvolutionWebhook(body) {
     event_type: body?.event ?? "provider.event",
     instance_id: body?.instance ?? body?.instanceName ?? null,
     occurred_at: body?.date_time ?? body?.timestamp ?? null,
-    provider_payload: body
+    provider_payload: redactSecrets(body)
   };
 }
 
@@ -44,6 +60,6 @@ export function normalizeMetaWebhook(body) {
     event_type: message ? "message.received" : status ? "message.delivery.updated" : "provider.event",
     instance_id: value?.metadata?.phone_number_id ?? null,
     occurred_at: message?.timestamp ?? status?.timestamp ?? null,
-    provider_payload: body
+    provider_payload: redactSecrets(body)
   };
 }

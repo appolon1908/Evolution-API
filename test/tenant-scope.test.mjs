@@ -145,3 +145,60 @@ test("state: READ cannot become FAILED; FAILED cannot become READ", () => {
   assert.equal(state.applyEvent(ev("f", "READ")).stale, true);
   assert.equal(state.get("f").state, "FAILED");
 });
+
+// --- (b) secret redaction in echo and forward --------------------------------
+
+async function withMockMiddleware(fn) {
+  const received = [];
+  const mock = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      received.push(Buffer.concat(chunks).toString("utf8"));
+      res.writeHead(202, { "content-type": "application/json" });
+      res.end("{}");
+    });
+  });
+  mock.listen(0, "127.0.0.1");
+  await once(mock, "listening");
+  try { await fn(`http://127.0.0.1:${mock.address().port}/events`, received); } finally { mock.close(); await once(mock, "close"); }
+}
+
+const FAKE_KEY = "test-upstream-apikey-not-real";
+
+test("redaction: Evolution apikey and token-like fields are stripped from the echo and the Middleware forward", async () => {
+  await withMockMiddleware(async (eventUrl, received) => {
+    await withServer({ EVOLUTION_WEBHOOK_SECRET: EVOLUTION_SECRET, FORWARD_EVENTS_ENABLED: "true", MIDDLEWARE_EVENT_URL: eventUrl }, async (base) => {
+      const res = await postEvolution(base, {
+        event: "messages.update",
+        instance: "inst-a",
+        apikey: FAKE_KEY,
+        server_url: "http://127.0.0.1:1",
+        data: { key: { id: "evo.redact", remoteJid: "15550000000@s.whatsapp.net" }, status: "DELIVERY_ACK", accessToken: FAKE_KEY, nested: { jwt_key: FAKE_KEY, client_secret: FAKE_KEY } }
+      });
+      assert.equal(res.status, 202);
+      const text = await res.text();
+      assert.ok(!text.includes(FAKE_KEY), "echo carries no key");
+      assert.equal(received.length, 1);
+      assert.ok(!received[0].includes(FAKE_KEY), "forward carries no key");
+      const event = JSON.parse(received[0]);
+      assert.equal(event.provider_payload.apikey, "[REDACTED]");
+      // Non-secret structure survives, including the message key object.
+      assert.equal(event.provider_payload.data.key.id, "evo.redact");
+      assert.equal(event.provider_message_id, "evo.redact");
+      assert.equal(event.provider_payload.data.status, "DELIVERY_ACK");
+    });
+  });
+});
+
+test("redaction: token-like fields in a Meta payload are stripped too", async () => {
+  await withServer({ META_APP_SECRET: APP_SECRET }, async (base) => {
+    const body = JSON.parse(metaStatusBody("wamid.redact", "delivered"));
+    body.entry[0].changes[0].value.access_token = FAKE_KEY;
+    const raw = JSON.stringify(body);
+    const res = await postMeta(base, raw, sign(APP_SECRET, raw));
+    const text = await res.text();
+    assert.ok(!text.includes(FAKE_KEY));
+    assert.ok(text.includes("wamid.redact"));
+  });
+});
