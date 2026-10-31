@@ -49,17 +49,47 @@ export function normalizeEvolutionWebhook(body) {
   };
 }
 
-export function normalizeMetaWebhook(body) {
-  const value = body?.entry?.[0]?.changes?.[0]?.value ?? {};
-  const message = value?.messages?.[0];
-  const status = value?.statuses?.[0];
+// Meta batches up to 1000 updates per POST across entry[], changes[],
+// messages[] and statuses[]. Produce one normalized event per message/status;
+// each event's provider_payload keeps the Meta envelope shape but carries only
+// its own item. A body with no message/status yields one generic event.
+export function normalizeMetaWebhookEvents(body) {
+  const events = [];
+  const entries = Array.isArray(body?.entry) ? body.entry : [];
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      const value = change?.value ?? {};
+      const { messages, statuses, ...rest } = value;
+      const one = (kind, item) => ({
+        ...(body?.object !== undefined ? { object: body.object } : {}),
+        entry: [{ id: entry?.id, changes: [{ field: change?.field, value: { ...rest, [kind]: [item] } }] }]
+      });
+      for (const message of Array.isArray(messages) ? messages : []) {
+        events.push(metaEvent(value, message, "message.received", one("messages", message)));
+      }
+      for (const status of Array.isArray(statuses) ? statuses : []) {
+        events.push(metaEvent(value, status, "message.delivery.updated", one("statuses", status)));
+      }
+    }
+  }
+  if (events.length === 0) events.push(metaEvent(body?.entry?.[0]?.changes?.[0]?.value ?? {}, null, "provider.event", body));
+  return events;
+}
+
+function metaEvent(value, item, eventType, payload) {
   return {
     source: "meta",
-    provider_event_id: message?.id ?? status?.id ?? null,
-    provider_message_id: message?.id ?? status?.id ?? null,
-    event_type: message ? "message.received" : status ? "message.delivery.updated" : "provider.event",
+    provider_event_id: item?.id ?? null,
+    provider_message_id: item?.id ?? null,
+    event_type: eventType,
     instance_id: value?.metadata?.phone_number_id ?? null,
-    occurred_at: message?.timestamp ?? status?.timestamp ?? null,
-    provider_payload: redactSecrets(body)
+    occurred_at: item?.timestamp ?? null,
+    provider_payload: redactSecrets(payload)
   };
+}
+
+// First normalized event of a Meta webhook (kept for single-event callers).
+export function normalizeMetaWebhook(body) {
+  return normalizeMetaWebhookEvents(body)[0];
 }

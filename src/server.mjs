@@ -4,7 +4,7 @@ import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
-import { normalizeEvolutionWebhook, normalizeMetaWebhook, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
+import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
 import { createMessageState } from "./state.mjs";
 
 const MAX_BODY = 1024 * 1024;
@@ -137,10 +137,19 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (!verifyMetaSignature(customConfig.metaAppSecret, raw, req.headers["x-hub-signature-256"])) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
-        const event = normalizeMetaWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        const { duplicate, stale, ignored } = state.applyEvent(event);
-        const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, ignored, event, forward });
+        const events = normalizeMetaWebhookEvents(JSON.parse(raw.toString("utf8") || "{}"));
+        // Apply and forward every item. A forward failure throws (non-2xx to
+        // Meta), so Meta redelivers the whole batch; already-applied items then
+        // report duplicate locally and Middleware must dedupe.
+        const results = [];
+        for (const event of events) {
+          const { duplicate, stale, ignored } = state.applyEvent(event);
+          const forward = await forwardEvent(customConfig, event, correlationId);
+          results.push({ provider_message_id: event.provider_message_id, duplicate, stale, ignored, forward });
+        }
+        // Top-level fields mirror the first item for single-event callers.
+        const { duplicate, stale, ignored, forward } = results[0];
+        return json(res, 202, { accepted: true, duplicate, stale, ignored, event: events[0], forward, results });
       }
 
       return json(res, 404, { error: { code: "not_found" } });
