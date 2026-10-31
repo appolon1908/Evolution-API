@@ -51,12 +51,29 @@ Each open connection can hold up to 3 MiB of a not-yet-authenticated Meta webhoo
 | `HTTP_HEADERS_TIMEOUT_MS` | 10000 | Request headers must arrive within this time (clamped to the request timeout). |
 | `HTTP_REQUEST_TIMEOUT_MS` | 30000 | The whole request, body included, must arrive within this time, otherwise 408 and the connection is closed. |
 
+Dropped connections are logged as `{"event":"http_connection_dropped","reason":"max_connections","max_connections":N,"dropped":K}`: the first drop immediately, then at most one line per 10 s carrying the count since the previous line, without client addresses. Alert on it.
+
 These are a backstop, not the primary control. At the ingress (reverse proxy / load balancer) in front of the adapter, recommended settings are:
 
 - body size: at most 3 MiB on `/internal/v1/whatsapp/webhooks/meta`, at most 1 MiB elsewhere;
 - per-client and total concurrent connections to the adapter well below `HTTP_MAX_CONNECTIONS`, with request buffering so slow senders are absorbed by the proxy;
+- the proxy's upstream keep-alive pool to the adapter (e.g. nginx `keepalive`, Envoy `max_connections`) well below `HTTP_MAX_CONNECTIONS`, summed over all proxy replicas: idle keep-alive sockets count against the cap for up to the keep-alive timeout (about 5 s), and a connection over the cap is dropped with no HTTP response (Meta retries, so nothing is lost, only delayed);
 - client body/header timeouts no longer than the adapter's;
 - the `/internal/v1/whatsapp/transport/*` routes reachable only from Middleware, never from the public internet.
+
+## Readiness (`GET /readyz`)
+
+`/readyz` reads static configuration only (no network calls), so it does not flap. It returns 503 with `reasons` when the adapter cannot do its job:
+
+- `adapter_service_token_missing`: `ADAPTER_SERVICE_TOKEN` is empty or whitespace. Every internal route (`/internal/v1/whatsapp/transport/*`) then answers 503, so Middleware cannot send or read back. This applies to **every** deployment, including a webhook-only one: a webhook-only deploy (no send, no readback) still serves its webhook routes but reports not-ready until a service token is set. That is intended for production, where Middleware needs send and readback; a deploy that really is webhook-only must either set a token or not gate traffic on `/readyz`.
+- `middleware_event_url_missing`: `FORWARD_EVENTS_ENABLED=true` without `MIDDLEWARE_EVENT_URL`.
+- `<provider>_webhook_secret_missing`, the Evolution secret-map codes (see above).
+
+Non-blocking `warnings`: `meta_verify_token_missing` (only matters when (re)subscribing the Meta webhook) and `evolution_webhook_legacy_secret_ignored`.
+
+## Open question: media keys
+
+Redaction replaces Baileys `mediaKey` / `media_key` values in the payload copies that are echoed and forwarded to Middleware. `mediaKey` decrypts the WhatsApp media blob at the `mmg.whatsapp.net` URL. If Middleware needs to download inbound Evolution media itself from the forwarded payload, it cannot with the key redacted; it would instead have to ask Evolution for the decoded media by message key (for example Evolution's get-base64-from-media-message endpoint). This is not confirmed against Middleware. Meta media are unaffected (they are fetched by media id via the Graph API). Owner decision needed before inbound media handling ships.
 
 ## Run
 

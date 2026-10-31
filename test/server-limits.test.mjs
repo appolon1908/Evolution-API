@@ -9,8 +9,8 @@ import { loadConfig } from "../src/config.mjs";
 // unauthenticated Meta body, so the number of connections and the time a
 // request may take to arrive are both bounded.
 
-async function listen(env = {}) {
-  const server = createApp(loadConfig({ PORT: "0", ADAPTER_SERVICE_TOKEN: "test-service-token", ...env }), { logger: () => {} });
+async function listen(env = {}, logger = () => {}) {
+  const server = createApp(loadConfig({ PORT: "0", ADAPTER_SERVICE_TOKEN: "test-service-token", ...env }), { logger });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   return server;
@@ -104,5 +104,26 @@ test("limits: slow request headers time out", async () => {
     const data = await c.closed;
     clearTimeout(timer);
     assert.match(data, /^HTTP\/1\.1 408 /);
+  } finally { await close(server); }
+});
+
+test("limits: dropped connections are logged as a throttled count, without addresses", async () => {
+  const logs = [];
+  const server = await listen({ HTTP_MAX_CONNECTIONS: "1" }, (entry) => logs.push(entry));
+  const port = server.address().port;
+  try {
+    const held = connect(port);
+    await held.ready;
+    held.socket.write("POST /internal/v1/whatsapp/webhooks/meta HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\nab");
+    await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 3; i++) {
+      const extra = connect(port);
+      await extra.ready;
+      await extra.closed;
+    }
+    const drops = logs.filter((e) => e.event === "http_connection_dropped");
+    assert.equal(drops.length, 1, "at most one line per throttle window");
+    assert.deepEqual(drops[0], { event: "http_connection_dropped", reason: "max_connections", max_connections: 1, dropped: 1 });
+    held.socket.destroy();
   } finally { await close(server); }
 });

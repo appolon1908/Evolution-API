@@ -30,6 +30,8 @@ function parseWebhookJson(raw) {
   try { return JSON.parse(raw.toString("utf8") || "{}"); } catch { return null; }
 }
 
+const DROP_LOG_INTERVAL_MS = 10000;
+
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { "content-type": "application/json; charset=utf-8", ...headers });
   res.end(JSON.stringify(body));
@@ -251,6 +253,20 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
     }
   });
   server.maxConnections = customConfig.httpMaxConnections;
+  // Connections over the cap are dropped by Node with no HTTP response.
+  // Count them; log at most one line per DROP_LOG_INTERVAL_MS (the first drop
+  // immediately) with the number dropped since the last line, and no
+  // addresses, so a flood cannot flood the logs.
+  let dropped = 0;
+  let lastDropLog = -Infinity;
+  server.on("drop", () => {
+    dropped += 1;
+    const now = Date.now();
+    if (now - lastDropLog < DROP_LOG_INTERVAL_MS) return;
+    logger({ event: "http_connection_dropped", reason: "max_connections", max_connections: customConfig.httpMaxConnections, dropped });
+    dropped = 0;
+    lastDropLog = now;
+  });
   return server;
 }
 
