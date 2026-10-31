@@ -26,8 +26,12 @@ export function verifyMetaSignature(appSecret, rawBody, signature) {
 const SECRET_FIELD = /(api[-_]?key|token|secret|passw(or)?d|authorization|jwt|credential|private[-_]?key)/i;
 export const REDACTED = "[REDACTED]";
 
+const MAX_REDACT_DEPTH = 32;
+
 export function redactSecrets(value, depth = 0) {
-  if (depth > 32 || value === null || typeof value !== "object") return value;
+  if (value === null || typeof value !== "object") return value;
+  // Fail closed: a subtree deeper than we inspect is replaced, never echoed.
+  if (depth > MAX_REDACT_DEPTH) return REDACTED;
   if (Array.isArray(value)) return value.map((item) => redactSecrets(item, depth + 1));
   const out = {};
   for (const [k, v] of Object.entries(value)) {
