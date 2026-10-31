@@ -87,11 +87,11 @@ export function evolutionWebhookSecretFor(config, instance) {
 //     empty), e.g. "token=eyJ..", "Bearer: eyJ..". The scan is linear (see
 //     containsJwt): no regex backtracking over the candidate, or
 //   - is an opaque authorization value: after trimming, "Bearer" or "Token"
-//     + (":" and optional whitespace, or whitespace) + one token68-style
-//     value of 8+ characters and nothing else (a whole-string
+//     + (":" with optional whitespace on either side, or whitespace) + one
+//     token68-style value of 8+ characters and nothing else (a whole-string
 //     "Token abcdefgh" message is an accepted false positive); strings over
 //     MAX_WHOLE_STRING_RULE_LENGTH are not checked by this rule, or
-//   - is, after trimming, "Basic" + (":" and optional whitespace, or
+//   - is, after trimming, "Basic" + (":" with optional whitespace around it, or
 //     whitespace) + one base64 value that decodes to "user:pass" form (same
 //     length guard).
 // Otherwise URL credentials are redacted in place, keeping the rest of the
@@ -114,9 +114,9 @@ const SESSION_QUALIFIERS = new Set(["id", "token", "key", "secret", "cookie", "d
 const COUNTER_WORDS = new Set(["count", "total", "used", "usage", "limit", "max", "min", "num", "number", "remaining", "prompt", "completion", "input", "output"]);
 // Maximal runs of base64url characters and "."; a JWT never spans a run.
 const JWT_RUN_SEPARATOR = /[^A-Za-z0-9_.-]+/;
-const OPAQUE_AUTH = /^(?:bearer|token)(?::\s*|\s+)[A-Za-z0-9._~+/=-]{8,}$/i;
+const OPAQUE_AUTH = /^(?:bearer|token)(?:\s*:\s*|\s+)[A-Za-z0-9._~+/=-]{8,}$/i;
 const MAX_WHOLE_STRING_RULE_LENGTH = 8192;
-const BASIC_AUTH = /^basic(?::\s*|\s+)([A-Za-z0-9+/]{4,}={0,2})$/i;
+const BASIC_AUTH = /^basic(?:\s*:\s*|\s+)([A-Za-z0-9+/]{4,}={0,2})$/i;
 // Bounded/disjoint character classes keep both scans linear on hostile input.
 const URL_USERINFO = /\b([a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/?#@]{1,512}@/gi;
 // Query names over 128 characters are not inspected (bounded scan).
