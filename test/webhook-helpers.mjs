@@ -35,19 +35,22 @@ export function metaStatusBody(id, status, timestamp = "1700000000") {
 const states = new Map();
 
 export async function withServer(env, fn) {
-  const state = createMessageState();
+  // Capture state logs so scope-mismatch warnings are assertable and quiet.
+  const logs = [];
+  const logger = (entry) => logs.push(entry);
+  const state = createMessageState({ logger });
   const server = createApp(loadConfig({
     PORT: "0",
     EXTERNAL_SEND_ENABLED: "false",
     FORWARD_EVENTS_ENABLED: "false",
     ADAPTER_SERVICE_TOKEN: SERVICE_TOKEN,
     ...env
-  }), { state });
+  }), { state, logger });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
   states.set(base, state);
-  try { await fn(base, state); } finally { states.delete(base); server.close(); await once(server, "close"); }
+  try { await fn(base, state, logs); } finally { states.delete(base); server.close(); await once(server, "close"); }
 }
 
 export async function postMeta(base, raw, signature) {

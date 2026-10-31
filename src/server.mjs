@@ -4,20 +4,30 @@ import { ProviderError, requireString } from "./contracts.mjs";
 import { createEvolutionProvider } from "./providers/evolution.mjs";
 import { createMetaProvider } from "./providers/meta.mjs";
 import { forwardEvent } from "./middleware.mjs";
-import { normalizeEvolutionWebhook, normalizeMetaWebhook, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
-import { createMessageState } from "./state.mjs";
+import { normalizeEvolutionWebhook, normalizeMetaWebhookEvents, summarizeMetaSkips, verifyMetaSignature, verifySharedSecret } from "./webhooks.mjs";
+import { createMessageState, defaultLogger } from "./state.mjs";
 
+// Request body caps, enforced while reading and therefore before any
+// signature or secret check (the read is unauthenticated memory exposure).
 const MAX_BODY = 1024 * 1024;
+// Meta: "Webhook payloads can be up to 3 MB" (WhatsApp webhooks guide); the
+// Meta webhook route alone accepts up to 3 MiB.
+const MAX_META_WEBHOOK_BODY = 3 * 1024 * 1024;
 
-async function readBody(req) {
+async function readBody(req, limit = MAX_BODY) {
   const chunks = [];
   let total = 0;
   for await (const chunk of req) {
     total += chunk.length;
-    if (total > MAX_BODY) throw new ProviderError("payload_too_large", "request body exceeds 1 MiB", { status: 413, retryHint: "never" });
+    if (total > limit) throw new ProviderError("payload_too_large", `request body exceeds ${limit / (1024 * 1024)} MiB`, { status: 413, retryHint: "never" });
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
+}
+
+// Parse a signature/secret-verified webhook body; null when it is not JSON.
+function parseWebhookJson(raw) {
+  try { return JSON.parse(raw.toString("utf8") || "{}"); } catch { return null; }
 }
 
 function json(res, status, body, headers = {}) {
@@ -25,7 +35,7 @@ function json(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
-export function createApp(customConfig = loadConfig(), { state = createMessageState() } = {}) {
+export function createApp(customConfig = loadConfig(), { state = createMessageState(), logger = defaultLogger } = {}) {
   const providers = {
     evolution: createEvolutionProvider(customConfig),
     meta: createMetaProvider(customConfig)
@@ -88,7 +98,8 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         const provider = providers[providerName];
         if (!provider) throw new ProviderError("unknown_provider", `unknown provider: ${providerName}`, { status: 400, retryHint: "never" });
         const result = await provider.send(body);
-        state.rememberAccepted(result, { tenantId });
+        const instanceId = providerName === "meta" ? customConfig.metaPhoneNumberId : body.instance_id;
+        state.rememberAccepted(result, { tenantId, instanceId });
         return json(res, 202, {
           command_id: body.command_id,
           correlation_id: body.correlation_id,
@@ -102,7 +113,12 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (authError) return json(res, authError.status, { error: { code: authError.code } });
         const tenantId = headerTenant(req);
         if (!tenantId) return json(res, 400, { error: { code: "tenant_id_required" } });
-        const id = decodeURIComponent(url.pathname.slice("/internal/v1/whatsapp/transport/messages/".length));
+        let id;
+        try {
+          id = decodeURIComponent(url.pathname.slice("/internal/v1/whatsapp/transport/messages/".length));
+        } catch {
+          return json(res, 400, { error: { code: "invalid_provider_message_id" } });
+        }
         // Unknown id and another tenant's id are indistinguishable (no existence oracle).
         const record = state.getForTenant(id, tenantId);
         if (!record) return json(res, 404, { error: { code: "provider_message_not_found" } });
@@ -114,10 +130,15 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
         if (!verifySharedSecret(customConfig.evolutionWebhookSecret, req.headers["x-codestra-webhook-secret"])) {
           return json(res, 401, { error: { code: "invalid_webhook_secret" } });
         }
-        const event = normalizeEvolutionWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        const { duplicate, stale } = state.applyEvent(event);
+        const parsed = parseWebhookJson(raw);
+        if (parsed === null) {
+          logger({ event: "webhook_malformed_payload", source: "evolution", bytes: raw.length });
+          return json(res, 400, { error: { code: "malformed_payload" } });
+        }
+        const event = normalizeEvolutionWebhook(parsed);
+        const { duplicate, stale, ignored, unrecognized } = state.applyEvent(event);
         const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
+        return json(res, 202, { accepted: true, duplicate, stale, ignored, unrecognized, event, forward });
       }
 
       if (req.method === "GET" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
@@ -132,19 +153,58 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
       }
 
       if (req.method === "POST" && url.pathname === "/internal/v1/whatsapp/webhooks/meta") {
-        const raw = await readBody(req);
+        const raw = await readBody(req, MAX_META_WEBHOOK_BODY);
         if (!verifyMetaSignature(customConfig.metaAppSecret, raw, req.headers["x-hub-signature-256"])) {
           return json(res, 401, { error: { code: "invalid_meta_signature" } });
         }
-        const event = normalizeMetaWebhook(JSON.parse(raw.toString("utf8") || "{}"));
-        const { duplicate, stale } = state.applyEvent(event);
-        const forward = await forwardEvent(customConfig, event, correlationId);
-        return json(res, 202, { accepted: true, duplicate, stale, event, forward });
+        const parsed = parseWebhookJson(raw);
+        if (parsed === null) {
+          // Signature-verified bytes that are not JSON will never parse on
+          // redelivery; Meta retries any non-200 for days, so acknowledge with
+          // 200, apply/forward nothing, and log (size only, never the body).
+          logger({ event: "webhook_malformed_payload", source: "meta", bytes: raw.length });
+          return json(res, 200, { accepted: false, error: { code: "malformed_payload" } });
+        }
+        const events = normalizeMetaWebhookEvents(parsed);
+        // Apply and forward every item. A forward failure throws (non-2xx to
+        // Meta), so Meta redelivers the whole batch; already-applied items then
+        // report duplicate locally and Middleware must dedupe.
+        // All forwards share one deadline; exceeding it throws a 503 so Meta
+        // redelivers instead of the batch running for up to N x 10 s.
+        // Items with no message/status id carry nothing Middleware can join on:
+        // they are not applied or forwarded and are counted as ignored.
+        // Id-less items, non-message fields and value-level errors are
+        // not forwarded; record counts only, before forwarding so the line is
+        // emitted even if the forward deadline is hit.
+        const noId = events.filter((e) => e.provider_message_id == null).length;
+        const { skippedFields, valueErrors } = summarizeMetaSkips(parsed);
+        if (noId > 0 || valueErrors > 0 || Object.keys(skippedFields).length > 0) {
+          logger({ event: "meta_webhook_items_skipped", source: "meta", no_provider_message_id: noId, skipped_fields: skippedFields, value_errors: valueErrors });
+        }
+        const deadline = Date.now() + customConfig.webhookForwardDeadlineMs;
+        const results = [];
+        for (const event of events) {
+          if (event.provider_message_id == null) {
+            results.push({ provider_message_id: null, duplicate: false, stale: false, ignored: true, unrecognized: false, forward: { forwarded: false, reason: "no_provider_message_id" } });
+            continue;
+          }
+          const { duplicate, stale, ignored, unrecognized } = state.applyEvent(event);
+          const forward = await forwardEvent(customConfig, event, correlationId, { deadline });
+          results.push({ provider_message_id: event.provider_message_id, duplicate, stale, ignored, unrecognized, forward });
+        }
+        // Top-level fields mirror the first item for single-event callers.
+        const { duplicate, stale, ignored, unrecognized, forward } = results[0];
+        // Meta: "respond to all Event Notifications with 200 OK"; any other
+        // status is retried (WhatsApp: up to 7 days).
+        return json(res, 200, { accepted: true, duplicate, stale, ignored, unrecognized, event: events[0], forward, results });
       }
 
       return json(res, 404, { error: { code: "not_found" } });
     } catch (error) {
       const status = error instanceof ProviderError ? error.status : 500;
+      // An oversized body was left partly unread: close the connection so it
+      // is not reused with the rest of that body still in flight.
+      const headers = status === 413 ? { connection: "close" } : {};
       return json(res, status, {
         error: {
           code: error.code || "internal_error",
@@ -152,7 +212,7 @@ export function createApp(customConfig = loadConfig(), { state = createMessageSt
           retry_hint: error.retryHint || "middleware_decides"
         },
         correlation_id: correlationId
-      });
+      }, headers);
     }
   });
 }
