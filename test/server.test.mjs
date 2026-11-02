@@ -30,7 +30,7 @@ test("external provider send is fail-closed by default", async () => {
       body: JSON.stringify({
         command_id: "11111111-1111-4111-8111-111111111111",
         correlation_id: "corr-12345678",
-        idempotency_key: "idem-12345678",
+        idempotency_key: "test-idem",
         provider: "evolution",
         instance_id: "test",
         recipient: "15550000000",
