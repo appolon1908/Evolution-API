@@ -1,0 +1,14 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+const { verifyFinding } = require('./verify_historical_fixtures.cjs');
+const [manifestPath, acornPath] = process.argv.slice(2);
+const acorn = require(acornPath);
+const finding = JSON.parse(fs.readFileSync(manifestPath))[0];
+const source = execFileSync('git', ['show', `${finding.Commit}:${finding.File}`], { encoding: 'utf8' });
+assert.equal(verifyFinding(source, finding, acorn), true);
+assert.equal(verifyFinding(source + '\n// altered immutable source', finding, acorn), false);
+assert.equal(verifyFinding(source, { ...finding, line_sha256: '0'.repeat(64) }, acorn), false);
+assert.equal(verifyFinding(source, { ...finding, literal_proofs: [] }, acorn), false);
+assert.equal(verifyFinding(source, { ...finding, StartLine: finding.StartLine + 1 }, acorn), false);
+console.log('Immutable historical fixture proof: positive and four tamper regressions PASS');
