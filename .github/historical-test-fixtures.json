@@ -1,0 +1,739 @@
+[
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/tenant-scope.test.mjs",
+    "StartLine": 42,
+    "Commit": "9f7330bd9ecdcb63229b44710457d8d0f31ea2ef",
+    "Fingerprint": "9f7330bd9ecdcb63229b44710457d8d0f31ea2ef:test/tenant-scope.test.mjs:generic-api-key:42",
+    "file_sha256": "ab387969682b8566d0e90cbbf8fdc2fae8113c4ba0aed00d5d63c67698f0f28b",
+    "line_sha256": "71b949530278e5018bc6839cbe6c528212df78c46a4a1bf4c931f5515c1dc3be",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1628,
+        "end": 1643,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "FunctionDeclaration",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/tenant-scope.test.mjs",
+    "StartLine": 42,
+    "Commit": "5ff769a0eefc64304a9f1b2935c81be406c8f7bf",
+    "Fingerprint": "5ff769a0eefc64304a9f1b2935c81be406c8f7bf:test/tenant-scope.test.mjs:generic-api-key:42",
+    "file_sha256": "ab387969682b8566d0e90cbbf8fdc2fae8113c4ba0aed00d5d63c67698f0f28b",
+    "line_sha256": "71b949530278e5018bc6839cbe6c528212df78c46a4a1bf4c931f5515c1dc3be",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1628,
+        "end": 1643,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "FunctionDeclaration",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/evolution-upstream-shape.test.mjs",
+    "StartLine": 92,
+    "Commit": "03f6e052786dee63e834dc6ac49e105412d93636",
+    "Fingerprint": "03f6e052786dee63e834dc6ac49e105412d93636:test/evolution-upstream-shape.test.mjs:generic-api-key:92",
+    "file_sha256": "8f0e0010eb17ead2e7117463beb0e069fd982d9241ebe4f1b06e2e04240b1827",
+    "line_sha256": "233bb4d7e5c375e84c45decced9c7923d17f9d0d61affc81d7e860c380111c87",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 4198,
+        "end": 4236,
+        "value_sha256": "bd7662a5eeb41614e720d477abfcb2272e19a8a70a93b7e3bc8560d44ad326e9",
+        "value_length": 36,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 4254,
+        "end": 4269,
+        "value_sha256": "3fd10205aa313684c4c0791ee58774b7fb72fad123a9346456bcecdf12352d4d",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 4288,
+        "end": 4303,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "jwt",
+    "File": "test/redaction-redos-golive.test.mjs",
+    "StartLine": 45,
+    "Commit": "baa6855e96ee61f9e2b7cb63ccb756aaf7e5b174",
+    "Fingerprint": "baa6855e96ee61f9e2b7cb63ccb756aaf7e5b174:test/redaction-redos-golive.test.mjs:jwt:45",
+    "file_sha256": "61435ca11404ee5c488237853281c248b4a5fa6385732307007ddd93135cc08c",
+    "line_sha256": "03dc79439f051fd62ceef239c348517292efc87b1bc74e9140dfb95658baf976",
+    "classification_proposed": "synthetic JWT redaction fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1733,
+        "end": 1828,
+        "value_sha256": "399a251a58d5be746a28731d9f411c4a54e3d0a2ca1401186d34a8fa516564e9",
+        "value_length": 93,
+        "ancestors": [
+          "Program",
+          "VariableDeclaration",
+          "VariableDeclarator"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/server.test.mjs",
+    "StartLine": 35,
+    "Commit": "e793ab7e3f5e693e643324f37af5c0248b593fa1",
+    "Fingerprint": "e793ab7e3f5e693e643324f37af5c0248b593fa1:test/server.test.mjs:generic-api-key:35",
+    "file_sha256": "82e4bbdf9eff6d337c4735219da745a4100b44f73144812fc9f8927a2af6168a",
+    "line_sha256": "39fe66a3148d3ea2069e34accc586a6866a08db7af4f86910458c61b852bcf06",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1480,
+        "end": 1497,
+        "value_sha256": "a7ad0f91d507a4fc7dcdf356c0b7e9375a89b315d297ebcf6b5544668a611bdc",
+        "value_length": 15,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 1499,
+        "end": 1514,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/server.test.mjs",
+    "StartLine": 84,
+    "Commit": "e793ab7e3f5e693e643324f37af5c0248b593fa1",
+    "Fingerprint": "e793ab7e3f5e693e643324f37af5c0248b593fa1:test/server.test.mjs:generic-api-key:84",
+    "file_sha256": "82e4bbdf9eff6d337c4735219da745a4100b44f73144812fc9f8927a2af6168a",
+    "line_sha256": "39fe66a3148d3ea2069e34accc586a6866a08db7af4f86910458c61b852bcf06",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 3317,
+        "end": 3334,
+        "value_sha256": "a7ad0f91d507a4fc7dcdf356c0b7e9375a89b315d297ebcf6b5544668a611bdc",
+        "value_length": 15,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3336,
+        "end": 3351,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/server.test.mjs",
+    "StartLine": 90,
+    "Commit": "e793ab7e3f5e693e643324f37af5c0248b593fa1",
+    "Fingerprint": "e793ab7e3f5e693e643324f37af5c0248b593fa1:test/server.test.mjs:generic-api-key:90",
+    "file_sha256": "82e4bbdf9eff6d337c4735219da745a4100b44f73144812fc9f8927a2af6168a",
+    "line_sha256": "dcb3c2d6769291db456182418dc468311c98143fe14040be8de99aeb7c9811e6",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 3547,
+        "end": 3562,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/readback-tenant.test.mjs",
+    "StartLine": 39,
+    "Commit": "1348b82645db06711949787a77b8cb2763c9cd48",
+    "Fingerprint": "1348b82645db06711949787a77b8cb2763c9cd48:test/readback-tenant.test.mjs:generic-api-key:39",
+    "file_sha256": "542d51209c5d1775bc03db8deb714cb73fb0b2a32ddd28b6e299f450d83d0ab9",
+    "line_sha256": "8285149aec29b3829e1e88c50e95aad762fdd638d3a6f4ed670c48d5bca10bbf",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1420,
+        "end": 1435,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "FunctionDeclaration",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "jwt",
+    "File": "test/review-fixes.test.mjs",
+    "StartLine": 66,
+    "Commit": "9ee110db0ee21b93dca3ef121324d4d2b9b0a201",
+    "Fingerprint": "9ee110db0ee21b93dca3ef121324d4d2b9b0a201:test/review-fixes.test.mjs:jwt:66",
+    "file_sha256": "37350601fd4a00c6027a83dc81020b28b3f3a8ec1fae89a24a442c003a42d51a",
+    "line_sha256": "ddfb969e3b96c6e1008fee64bfa2aa76f1446d8f8d2cfb15c974eb0eb99a5c9d",
+    "classification_proposed": "synthetic JWT redaction fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 2440,
+        "end": 2535,
+        "value_sha256": "399a251a58d5be746a28731d9f411c4a54e3d0a2ca1401186d34a8fa516564e9",
+        "value_length": 93,
+        "ancestors": [
+          "Program",
+          "VariableDeclaration",
+          "VariableDeclarator"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "jwt",
+    "File": "test/review-fixes.test.mjs",
+    "StartLine": 66,
+    "Commit": "2452e9d67a59a856f76c2a405f9658865de02dd9",
+    "Fingerprint": "2452e9d67a59a856f76c2a405f9658865de02dd9:test/review-fixes.test.mjs:jwt:66",
+    "file_sha256": "37350601fd4a00c6027a83dc81020b28b3f3a8ec1fae89a24a442c003a42d51a",
+    "line_sha256": "ddfb969e3b96c6e1008fee64bfa2aa76f1446d8f8d2cfb15c974eb0eb99a5c9d",
+    "classification_proposed": "synthetic JWT redaction fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 2440,
+        "end": 2535,
+        "value_sha256": "399a251a58d5be746a28731d9f411c4a54e3d0a2ca1401186d34a8fa516564e9",
+        "value_length": 93,
+        "ancestors": [
+          "Program",
+          "VariableDeclaration",
+          "VariableDeclarator"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/server.test.mjs",
+    "StartLine": 33,
+    "Commit": "3a1870ad267691e8381ec750321afc77ee21a54f",
+    "Fingerprint": "3a1870ad267691e8381ec750321afc77ee21a54f:test/server.test.mjs:generic-api-key:33",
+    "file_sha256": "38ac171bba40e2b6170e9cbc9fe50de1dc9234eec687ecf5340db0a3334cc68e",
+    "line_sha256": "dcb3c2d6769291db456182418dc468311c98143fe14040be8de99aeb7c9811e6",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 1362,
+        "end": 1377,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "AwaitExpression",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "AwaitExpression",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/redaction-nits.test.mjs",
+    "StartLine": 64,
+    "Commit": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97",
+    "Fingerprint": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97:test/redaction-nits.test.mjs:generic-api-key:64",
+    "file_sha256": "2109d5c5021cbd3cc4b1ee67f6e9aa7b75da51012a1bd8c31b920b49c7a43bc6",
+    "line_sha256": "fe7eae30ef88502faf6eb65171f41c01497833d00bd548c9ab7360872a59d282",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 3326,
+        "end": 3360,
+        "value_sha256": "11fbbf5a9190c1100f4150f95a34cfc78a86556a456904f20a3e71ff37e2fccf",
+        "value_length": 32,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3373,
+        "end": 3385,
+        "value_sha256": "438cd5f47765f87954dc9e72da2ecd6ea9179e9d516fe5cd05d4e4b9a7d706fa",
+        "value_length": 10,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3406,
+        "end": 3418,
+        "value_sha256": "3f3b4313e71a7e1cbfbc359314fc3de34eab90a3d441761cae10fcb2a6aba1ff",
+        "value_length": 10,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3430,
+        "end": 3442,
+        "value_sha256": "fd824fcedd245e55871c74cb48ebbad02dab9bc4b9370433b609d6022ece7a73",
+        "value_length": 10,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3456,
+        "end": 3462,
+        "value_sha256": "894b2bd86b2154d5f8b98042c6d06982e260c762d16583584dc71e3f005fe9f6",
+        "value_length": 4,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 3469,
+        "end": 3501,
+        "value_sha256": "d40a1d31a3e726eed99938339bf85e5d5979eac712959c90ad2454db48396719",
+        "value_length": 30,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/redaction-nits.test.mjs",
+    "StartLine": 87,
+    "Commit": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97",
+    "Fingerprint": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97:test/redaction-nits.test.mjs:generic-api-key:87",
+    "file_sha256": "2109d5c5021cbd3cc4b1ee67f6e9aa7b75da51012a1bd8c31b920b49c7a43bc6",
+    "line_sha256": "dfbd46cec700761040daa5518376903a6036da1976e1b8385a1c726414d7748b",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 4676,
+        "end": 4714,
+        "value_sha256": "bd7662a5eeb41614e720d477abfcb2272e19a8a70a93b7e3bc8560d44ad326e9",
+        "value_length": 36,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 4732,
+        "end": 4747,
+        "value_sha256": "3fd10205aa313684c4c0791ee58774b7fb72fad123a9346456bcecdf12352d4d",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      },
+      {
+        "start": 4766,
+        "end": 4781,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "VariableDeclaration",
+          "VariableDeclarator",
+          "CallExpression",
+          "ObjectExpression",
+          "Property"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "generic-api-key",
+    "File": "test/redaction-nits.test.mjs",
+    "StartLine": 95,
+    "Commit": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97",
+    "Fingerprint": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97:test/redaction-nits.test.mjs:generic-api-key:95",
+    "file_sha256": "2109d5c5021cbd3cc4b1ee67f6e9aa7b75da51012a1bd8c31b920b49c7a43bc6",
+    "line_sha256": "6a143d105375cd0242fbd8a9b7e885d4da749da057ab813f10bf2242ffbd886f",
+    "classification_proposed": "synthetic idempotency/header/auth fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 5182,
+        "end": 5197,
+        "value_sha256": "f05c95731929bc4d7259a6bed2365c21ee9d7e6c940e0a923583fc613fcecc5c",
+        "value_length": 13,
+        "ancestors": [
+          "Program",
+          "ExpressionStatement",
+          "CallExpression",
+          "ArrowFunctionExpression",
+          "BlockStatement",
+          "ExpressionStatement",
+          "CallExpression"
+        ]
+      }
+    ]
+  },
+  {
+    "RuleID": "jwt",
+    "File": "test/redaction-nits.test.mjs",
+    "StartLine": 7,
+    "Commit": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97",
+    "Fingerprint": "e4b0b2459016f27ec9fb3381a05c8d0bd3f4ff97:test/redaction-nits.test.mjs:jwt:7",
+    "file_sha256": "2109d5c5021cbd3cc4b1ee67f6e9aa7b75da51012a1bd8c31b920b49c7a43bc6",
+    "line_sha256": "ddfb969e3b96c6e1008fee64bfa2aa76f1446d8f8d2cfb15c974eb0eb99a5c9d",
+    "classification_proposed": "synthetic JWT redaction fixture",
+    "review_status": "INDEPENDENTLY_CLASSIFIED_SYNTHETIC_BY_AGENT_A",
+    "literal_proofs": [
+      {
+        "start": 297,
+        "end": 392,
+        "value_sha256": "399a251a58d5be746a28731d9f411c4a54e3d0a2ca1401186d34a8fa516564e9",
+        "value_length": 93,
+        "ancestors": [
+          "Program",
+          "VariableDeclaration",
+          "VariableDeclarator"
+        ]
+      }
+    ]
+  }
+]
