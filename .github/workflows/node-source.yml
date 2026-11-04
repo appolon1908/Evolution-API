@@ -1,0 +1,106 @@
+name: Owned Node source validation
+on:
+  pull_request:
+permissions:
+  contents: read
+env:
+  EXTERNAL_SEND_ENABLED: 'false'
+  FORWARD_EVENTS_ENABLED: 'false'
+  WHATSAPP_PRODUCTION_SEND: 'false'
+  WHATSAPP_BULK_SEND: 'false'
+  WHATSAPP_AI_AUTOREPLY: 'false'
+  WHATSAPP_EXTERNAL_RECIPIENTS: 'false'
+  PROVIDER_ENROLLMENT_ENABLED: 'false'
+  PRODUCTION_GO: 'NO'
+  LIVE_CAPABILITIES_ENABLED: 'NO'
+  EXTERNAL_EFFECTS: 'false'
+jobs:
+  test:
+    name: Node source tests (${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Check all tracked JavaScript syntax
+        run: git ls-files -z '*.mjs' '*.js' '*.cjs' | xargs -0 -r -n1 node --check
+      - name: Resolve dependency metadata without lifecycle scripts and audit it
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm audit --audit-level=high
+      - name: Run every repository test
+        run: npm test
+      - name: Validate package assembly without publishing or lifecycle scripts
+        run: npm pack --dry-run --ignore-scripts
+  secrets:
+    name: Full-history and source secret scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      REVIEWED_FIXTURE_MANIFEST_SHA256: b5e85e0568284fae033681414087e3b1c7f22f84198d120a3b69f579feb61623
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Require trusted exact historical fixture authority before installing proof parser
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BASE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          if git cat-file -e "$BASE_SHA:.github/historical-test-fixtures.json" 2>/dev/null; then
+            git diff --exit-code "$BASE_SHA" -- .github
+          else
+            test "$BASE_SHA" = 0cce37ad9e9557cd26e1ab2bf052056a9e8fc8a4
+          fi
+          npm install --prefix "$RUNNER_TEMP/scanner-proof" --ignore-scripts --no-audit --no-fund acorn@8.15.0
+      - name: Scan complete effective tree and tracked history
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz --output "$archive"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          python3_path="$(command -v python3)"
+          node .github/scripts/verify_historical_fixtures.cjs .github/historical-test-fixtures.json "$RUNNER_TEMP/scanner-proof/node_modules/acorn" "$RUNNER_TEMP/reviewed-synthetic-fixtures.ignore"
+          node .github/scripts/verify-fixture-regressions.cjs .github/historical-test-fixtures.json "$RUNNER_TEMP/scanner-proof/node_modules/acorn"
+          "$python3_path" .github/scripts/check_history_detection.py "$RUNNER_TEMP/gitleaks" "$RUNNER_TEMP/reviewed-synthetic-fixtures.ignore"
+          for scope in git dir; do
+            extra=()
+            if [[ "$scope" == git ]]; then extra=(--gitleaks-ignore-path "$RUNNER_TEMP/reviewed-synthetic-fixtures.ignore"); fi
+            if ! "$RUNNER_TEMP/gitleaks" "$scope" "${extra[@]}" --no-banner --redact=100 --exit-code 1 --report-format json --report-path "$RUNNER_TEMP/gitleaks-redacted.json" .; then
+              python - <<'PYTHON'
+          import json,os
+          from pathlib import Path
+          for finding in json.loads((Path(os.environ['RUNNER_TEMP'])/'gitleaks-redacted.json').read_text()):
+              print(json.dumps({key:finding.get(key) for key in ('RuleID','File','StartLine','Commit','Fingerprint')}))
+          PYTHON
+              exit 1
+            fi
+          done
+  node-source-validation:
+    name: node-source-validation
+    needs: [test, secrets]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require full matrix tests, audit, packaging and secret scans
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          SECRET_RESULT: ${{ needs.secrets.result }}
+        run: |
+          test "$TEST_RESULT" = success
+          test "$SECRET_RESULT" = success
